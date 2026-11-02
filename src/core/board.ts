@@ -18,6 +18,8 @@ export interface Tile {
   age?: number;
   /** Ice layers: frozen fruit can't be swapped; each clear cracks one layer instead of removing it. */
   ice?: number;
+  /** Piñata hearts left. */
+  hp?: number;
 }
 
 export interface Cell {
@@ -61,6 +63,21 @@ export const COCONUT = -2;
 /** Spoiled fruit: can't be matched; cleared by a match next to it or by a blast. */
 export const MUSH = -3;
 
+/** Piñata: can't be moved or matched; matches next to it (or blasts) knock off a heart; at 0 it bursts. */
+export const PINATA = -4;
+
+/** Lava: can't be moved or matched; cleared by a match next to it or a blast; spreads if left alone. */
+export const LAVA = -5;
+
+/** Tiles the player can never move. */
+export const isFixed = (t: Tile) => t.kind === PINATA || t.kind === LAVA || !!t.ice;
+
+export interface Conveyor {
+  row: number;
+  /** +1 slides right, -1 slides left. */
+  dir: 1 | -1;
+}
+
 /** Which way fruit falls (Island Tilt changes this). */
 export type Gravity = 'down' | 'up' | 'left' | 'right';
 export const GRAVITY_VEC: Record<Gravity, [number, number]> = { down: [1, 0], up: [-1, 0], left: [0, -1], right: [0, 1] };
@@ -70,7 +87,8 @@ export const GRAVITY_VEC: Record<Gravity, [number, number]> = { down: [1, 0], up
  *  Optional layout strings (one per row) shape the board:
  *    '.' normal cell   ' ' or '#' hole (no cell; fruit falls straight past)
  *    's' sand          'S' deep sand (2 layers)     'o' starts with a coconut
- *    'i' frozen fruit  'I' double-frozen fruit */
+ *    'i' frozen fruit  'I' double-frozen fruit
+ *    'p' piñata        'v' lava        'l' lantern (always lit at night) */
 export class Board {
   grid: (Tile | null)[][];
   /** Playable cells (false = hole). */
@@ -99,6 +117,14 @@ export class Board {
   personalities = false;
   /** Grape juice puddles: the next fruit popped on a puddle scores a bonus. */
   puddle: boolean[][];
+  /** Night: the board is dark except near recent matches and lanterns. */
+  night = false;
+  /** Moves of light left on each cell (night levels). */
+  light: number[][];
+  /** Lanterns keep their cell and neighbours lit. */
+  lantern: boolean[][];
+  /** Rows that slide sideways after every move. */
+  conveyors: Conveyor[] = [];
   private nextId = 1;
   private layout: string[] | null;
 
@@ -116,6 +142,8 @@ export class Board {
       return ch !== ' ' && ch !== '#';
     }));
     this.puddle = Array.from({ length: rows }, () => Array<boolean>(cols).fill(false));
+    this.light = Array.from({ length: rows }, () => Array<number>(cols).fill(0));
+    this.lantern = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => layout?.[r]?.[c] === 'l'));
     this.sand = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => {
       const ch = layout?.[r]?.[c];
       return ch === 's' ? 1 : ch === 'S' ? 2 : 0;
@@ -155,6 +183,14 @@ export class Board {
   /** Is this row under the tide? */
   underwater(r: number): boolean {
     return this.tide > 0 && r >= this.rows - this.tide;
+  }
+
+  pinatasLeft(): number {
+    return this.grid.flat().filter((t) => t?.kind === PINATA).length;
+  }
+
+  lavaLeft(): number {
+    return this.grid.flat().filter((t) => t?.kind === LAVA).length;
   }
 
   iceLeft(): number {
@@ -214,8 +250,11 @@ export class Board {
             this.grid[r][c] = null;
             continue;
           }
-          if (this.layout?.[r]?.[c] === 'o') {
-            this.grid[r][c] = this.newTile(COCONUT);
+          const lch = this.layout?.[r]?.[c];
+          if (lch === 'o' || lch === 'p' || lch === 'v') {
+            const t = this.newTile(lch === 'o' ? COCONUT : lch === 'p' ? PINATA : LAVA);
+            if (lch === 'p') t.hp = 3;
+            this.grid[r][c] = t;
             continue;
           }
           const banned = new Set<number>();
@@ -274,7 +313,7 @@ export class Board {
     const ta = this.grid[a.r][a.c], tb = this.grid[b.r][b.c];
     if (!ta || !tb) return false;
     if (this.underwater(a.r) || this.underwater(b.r)) return false; // fruit under the tide can't be moved
-    if (ta.ice || tb.ice) return false; // frozen fruit can't be moved
+    if (isFixed(ta) || isFixed(tb)) return false; // frozen fruit, piñatas and lava can't be moved
     if (ta.special === 'rainbow' || tb.special === 'rainbow') return true;
     if (ta.special && tb.special) return true;
     if (ta.kind === tb.kind) return false;
@@ -435,7 +474,7 @@ export class Board {
     for (let r = 0; r < this.rows; r++)
       for (let c = 0; c < this.cols; c++) {
         const t = this.grid[r][c];
-        if (t && t.kind !== COCONUT && !t.ice) cells.push({ r, c });
+        if (t && t.kind !== COCONUT && !isFixed(t)) cells.push({ r, c });
       }
     const tiles = cells.map(({ r, c }) => this.grid[r][c]!);
     for (let attempt = 0; attempt < 500; attempt++) {

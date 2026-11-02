@@ -1,7 +1,7 @@
 /** Resolves a whole player move (swap → matches → specials → cascades) into a list of
  *  steps. Pure and deterministic: the renderer just replays the steps, and the
  *  simulator uses exactly the same rules. */
-import { Board, COCONUT, MUSH, Cell, FallMove, Gravity, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
+import { Board, COCONUT, MUSH, PINATA, LAVA, Cell, FallMove, Gravity, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
 import { groupScore } from './scoring';
 import { randInt } from './rng';
 
@@ -63,7 +63,36 @@ export interface ClearStep {
   puddlesUsed: Cell[];
   /** Strawberry matches this step (they soothe café customers). */
   sweet: number;
+  /** Piñatas hit this step (hearts left; 0 = burst). */
+  pinatas: { tile: Tile; r: number; c: number; hp: number }[];
+  /** Cells lit up by matches (night levels). */
+  lit: Cell[];
 }
+
+/** Rows that slid sideways at the end of the move. */
+export interface ConveyorStep {
+  type: 'conveyor';
+  moves: { tile: Tile; r: number; fromC: number; toC: number; wrap: boolean }[];
+}
+
+/** Lava spread into a fruit because none was cooled this move. */
+export interface LavaStep {
+  type: 'lava';
+  tile: Tile;
+  r: number;
+  c: number;
+}
+
+/** Night: light levels after the move (lights fade over time). */
+export interface NightStep {
+  type: 'night';
+  light: number[][];
+}
+
+export const PINATA_POINTS = 400;
+export const LAVA_POINTS = 120;
+/** Moves a cell stays lit after a match nearby. */
+export const LIGHT_MOVES = 4;
 
 /** A fruit's personality firing: shown as a little label on the board. */
 export interface Trait {
@@ -129,7 +158,7 @@ export interface TideStep {
   nextRise: number;
 }
 
-export type Step = ClearStep | FallStep | ShuffleStep | CollectStep | RipenStep | TiltStep | TideStep;
+export type Step = ClearStep | FallStep | ShuffleStep | CollectStep | RipenStep | TiltStep | TideStep | ConveyorStep | LavaStep | NightStep;
 
 /** Golden fruit spoils after this many moves. */
 export const SPOIL_MOVES = 6;
@@ -148,6 +177,8 @@ export interface MoveResult {
   iceCracked: number;
   /** Strawberry matches (café customers get calmer). */
   sweet: number;
+  pinatasBurst: number;
+  lavaCleared: number;
 }
 
 export interface EngineCtx {
@@ -205,6 +236,9 @@ class StepBuilder {
   iceHits: Cell[] = [];
   newPuddles: Cell[] = [];
   sweet = 0;
+  pinataHits = new Map<number, Cell>();
+  pinataDone = new Set<number>();
+  pinataLog: { tile: Tile; r: number; c: number; hp: number }[] = [];
   score = 0;
 
   constructor(private board: Board, private ctx: EngineCtx, readonly chain: number) {}
@@ -215,6 +249,10 @@ class StepBuilder {
     if (this.protect.has(k) || this.clear.has(k)) return;
     const t = this.board.get(cell.r, cell.c);
     if (!t || (t.kind === COCONUT && !t.special)) return; // coconuts can't be blasted
+    if (t.kind === PINATA) {
+      this.pinataHits.set(k, { r: cell.r, c: cell.c }); // knock off a heart instead
+      return;
+    }
     this.clear.set(k, { r: cell.r, c: cell.c });
     if (t.special && !this.detonated.has(k)) this.queue.push({ r: cell.r, c: cell.c });
   }
@@ -293,12 +331,35 @@ class StepBuilder {
 
   run(): void {
     this.personalities();
-    // Matching next to mush cleans it up.
+    // Matching next to mush or lava clears it; next to a piñata knocks off a heart.
     for (const { r, c } of this.matchedCells)
       for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const t = this.board.get(r + dr, c + dc);
-        if (t?.kind === MUSH) this.add({ r: r + dr, c: c + dc });
+        if (t?.kind === MUSH || t?.kind === LAVA || t?.kind === PINATA) this.add({ r: r + dr, c: c + dc });
       }
+    for (let guard = 0; guard < 50; guard++) {
+      this.detonate();
+      // Piñatas: one heart per step; a burst scatters confetti over the cells around it.
+      const fresh = [...this.pinataHits].filter(([k]) => !this.pinataDone.has(k));
+      if (!fresh.length) break;
+      for (const [k, cell] of fresh) {
+        this.pinataDone.add(k);
+        const t = this.board.get(cell.r, cell.c)!;
+        t.hp = (t.hp ?? 3) - 1;
+        this.pinataLog.push({ tile: t, r: cell.r, c: cell.c, hp: t.hp });
+        if (t.hp <= 0) {
+          this.clear.set(k, { r: cell.r, c: cell.c });
+          this.score += PINATA_POINTS;
+          const around: Cell[] = [];
+          for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if ((dr || dc) && this.board.inBounds({ r: cell.r + dr, c: cell.c + dc })) around.push({ r: cell.r + dr, c: cell.c + dc });
+          this.blasts.push({ type: 'bomb', origin: cell, cells: around, radius: 1 });
+          around.forEach((c) => this.add(c));
+        }
+      }
+    }
+  }
+
+  private detonate(): void {
     while (this.queue.length) {
       const cell = this.queue.shift()!;
       const k = cellKey(cell.r, cell.c);
@@ -546,12 +607,28 @@ class StepBuilder {
       }
     this.score += puddlesUsed.length * PUDDLE_POINTS;
     for (const c of this.newPuddles) board.puddle[c.r][c.c] = true;
+    // Night: matches light up the cells around them for a few moves.
+    const lit: Cell[] = [];
+    if (board.night) {
+      const seen = new Set<number>();
+      for (const { r, c } of [...this.matchedCells, ...this.clear.values()])
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) {
+            const rr = r + dr, cc = c + dc, k = cellKey(rr, cc);
+            if (seen.has(k) || !board.inBounds({ r: rr, c: cc })) continue;
+            seen.add(k);
+            board.light[rr][cc] = LIGHT_MOVES;
+            lit.push({ r: rr, c: cc });
+          }
+    }
+    // Lava cooled by this step's matches and blasts.
+    for (const cell of this.clear.values()) if (board.get(cell.r, cell.c)?.kind === LAVA) this.score += LAVA_POINTS;
     board.clear([...this.clear.values()]);
     for (const cr of this.created) {
       cr.tile.special = cr.special;
       if (cr.special === 'rainbow') cr.tile.kind = RAINBOW;
     }
-    return { type: 'clear', chain: this.chain, cleared, created: this.created, blasts: this.blasts, score: this.score, pops: this.pops, combo, sand, ice, traits: this.traits, grown: this.grown, puddlesAdded: this.newPuddles, puddlesUsed, sweet: this.sweet };
+    return { type: 'clear', chain: this.chain, cleared, created: this.created, blasts: this.blasts, score: this.score, pops: this.pops, combo, sand, ice, traits: this.traits, grown: this.grown, puddlesAdded: this.newPuddles, puddlesUsed, sweet: this.sweet, pinatas: this.pinataLog, lit };
   }
 }
 
@@ -584,7 +661,7 @@ export function playTilt(board: Board, dir: Gravity, ctx: EngineCtx): MoveResult
 }
 
 function emptyResult(): MoveResult {
-  return { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0, flooded: false, iceCracked: 0, sweet: 0 };
+  return { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0, flooded: false, iceCracked: 0, sweet: 0, pinatasBurst: 0, lavaCleared: 0 };
 }
 
 /** Shared end of every move: first clear (if any), cascades, ripening, tide, shuffle. */
@@ -598,6 +675,15 @@ function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: 
   } else chain = 0;
 
   cascade();
+  // Conveyor belts slide their rows one step (which can line up new matches).
+  const conv = conveyorShift(board);
+  if (conv) {
+    result.steps.push(conv);
+    if (board.findMatches().length) {
+      chain = 0;
+      cascade(true);
+    }
+  }
   // End of move: fruit ripens (which can set off more matches), old golden fruit spoils.
   const ripen = ripenBoard(board);
   if (ripen) {
@@ -606,6 +692,12 @@ function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: 
       chain = 0;
       cascade(true);
     }
+  }
+
+  // Lava creeps into a neighbouring fruit unless some was cooled this move.
+  if (result.lavaCleared === 0 && board.lavaLeft() > 0) {
+    const lava = spreadLava(board);
+    if (lava) result.steps.push(lava);
   }
 
   // The tide: matches at the waterline push it back; it rises every few moves.
@@ -623,6 +715,12 @@ function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: 
     }
     result.steps.push({ type: 'tide', tide: board.tide, pushed: tidePushed, change, nextRise: board.tideEvery - board.tideCounter });
     if (board.tide >= board.tideMax) result.flooded = true;
+  }
+
+  // Night: light fades a little each move; lanterns stay lit.
+  if (board.night) {
+    fadeLight(board);
+    result.steps.push({ type: 'night', light: board.light.map((r) => [...r]) });
   }
 
   if (!board.findHint()) {
@@ -663,6 +761,8 @@ function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: 
     result.sandCleared += step.sand.length;
     result.iceCracked += step.ice.length;
     result.sweet += step.sweet;
+    result.pinatasBurst += step.pinatas.filter((p) => p.hp <= 0).length;
+    result.lavaCleared += step.cleared.filter((c) => c.kind === LAVA).length;
     if (board.tide > 0) {
       const waterTop = board.rows - board.tide;
       if (step.cleared.some((c) => c.r >= waterTop - 1)) tidePushed = true;
@@ -697,4 +797,53 @@ export function ripenBoard(board: Board): RipenStep | null {
       }
     }
   return any ? step : null;
+}
+/** Slide each conveyor row one step (wrapping around). Rows jammed by fixed tiles don't move. */
+export function conveyorShift(board: Board): ConveyorStep | null {
+  if (!board.conveyors.length) return null;
+  const moves: ConveyorStep['moves'] = [];
+  for (const { row, dir } of board.conveyors) {
+    const cols: number[] = [];
+    for (let c = 0; c < board.cols; c++) if (board.mask[row]?.[c]) cols.push(c);
+    const tiles = cols.map((c) => board.grid[row][c]);
+    if (tiles.some((t) => !t || t.kind === PINATA || t.kind === LAVA || t.ice)) continue;
+    const n = cols.length;
+    const moved = tiles.map((_, i) => tiles[(i - dir + n) % n]!);
+    cols.forEach((c, i) => (board.grid[row][c] = moved[i]));
+    tiles.forEach((t, i) => {
+      const j = i + dir;
+      moves.push({ tile: t!, r: row, fromC: cols[i], toC: cols[(j + n) % n], wrap: j < 0 || j >= n });
+    });
+  }
+  return moves.length ? { type: 'conveyor', moves } : null;
+}
+
+/** Lava swallows one fruit next to it. */
+export function spreadLava(board: Board): LavaStep | null {
+  const options: Cell[] = [];
+  for (let r = 0; r < board.rows; r++)
+    for (let c = 0; c < board.cols; c++) {
+      if (board.grid[r][c]?.kind !== LAVA) continue;
+      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const t = board.get(r + dr, c + dc);
+        if (t && t.kind >= 0 && !t.special && !t.ice) options.push({ r: r + dr, c: c + dc });
+      }
+    }
+  if (!options.length) return null;
+  const at = options[randInt(board.rng, options.length)];
+  const t = board.grid[at.r][at.c]!;
+  t.kind = LAVA;
+  delete t.golden;
+  delete t.unripe;
+  return { type: 'lava', tile: t, r: at.r, c: at.c };
+}
+
+/** Night: every cell loses a move of light; lanterns keep their cell and neighbours lit. */
+export function fadeLight(board: Board): void {
+  for (let r = 0; r < board.rows; r++) for (let c = 0; c < board.cols; c++) if (board.light[r][c] > 0) board.light[r][c]--;
+  for (let r = 0; r < board.rows; r++)
+    for (let c = 0; c < board.cols; c++)
+      if (board.lantern[r][c])
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) if (board.inBounds({ r: r + dr, c: c + dc })) board.light[r + dr][c + dc] = LIGHT_MOVES;
 }

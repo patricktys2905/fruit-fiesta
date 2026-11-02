@@ -63,6 +63,8 @@ $('btn-play').onclick = () => {
 
 /** Picture shown on a level's map stop and card: its main goal. */
 function levelIcon(l: LevelDef): string {
+  if (l.layout?.some((r) => r.includes('p'))) return fruitIconUrl(-4);
+  if (l.layout?.some((r) => r.includes('v'))) return fruitIconUrl(-5);
   if (l.cafe) return fruitIconUrl(-1);
   if (l.layout?.some((r) => /[iI]/.test(r))) return iceIconUrl();
   if (l.golden) return goldenIconUrl();
@@ -244,6 +246,10 @@ function openLevelCard(lvl: LevelDef) {
   if (lvl.tide) tips.push('The tide rises every few moves: match at the waterline to push it back');
   if (lvl.tilt) tips.push('Use the tilt buttons to change which way fruit falls');
   if (lvl.layout?.some((r) => /[iI]/.test(r))) tips.push('Frozen fruit can\'t move: match with it to crack the ice');
+  if (lvl.layout?.some((r) => r.includes('p'))) tips.push('Match next to a piñata (or blast it) 3 times to burst it');
+  if (lvl.night) tips.push('It\'s dark! Matches light up the area around them for a few moves');
+  if (lvl.conveyors?.length) tips.push('Conveyor rows slide one step after every move');
+  if (lvl.layout?.some((r) => r.includes('v'))) tips.push('Lava spreads every move you don\'t cool some: match next to it');
   if (lvl.personalities) tips.push('Fruit powers: 🍋 zing sand · 🥝 ripen · 🍇 bonus puddles · 🍊 pop one more · 🍓 calm customers · 🫐 chill ice');
   if (hasSand(lvl)) tips.push('Match fruit on the sand to wash it away');
   if (lvl.coconuts) tips.push('Drop coconuts to the bottom to collect them');

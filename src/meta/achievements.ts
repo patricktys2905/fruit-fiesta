@@ -19,11 +19,13 @@ export interface Lifetime {
   customers: number;
   golden: number;
   ice: number;
+  pinatas: number;
+  lava: number;
 }
 
 export const freshLifetime = (): Lifetime => ({
   wins: 0, jets: 0, bees: 0, bursts: 0, smoothies: 0, combos: 0, fruit: 0, sand: 0, coconuts: 0,
-  bestScore: 0, bestChain: 0, lastMoveWins: 0, questsDone: 0, customers: 0, golden: 0, ice: 0,
+  bestScore: 0, bestChain: 0, lastMoveWins: 0, questsDone: 0, customers: 0, golden: 0, ice: 0, pinatas: 0, lava: 0,
 });
 
 export function addReport(l: Lifetime, r: LevelReport): void {
@@ -39,6 +41,8 @@ export function addReport(l: Lifetime, r: LevelReport): void {
   l.customers += r.customers ?? 0;
   l.golden += r.golden ?? 0;
   l.ice += r.ice ?? 0;
+  l.pinatas += r.pinatas ?? 0;
+  l.lava += r.lava ?? 0;
   l.bestScore = Math.max(l.bestScore, r.score);
   l.bestChain = Math.max(l.bestChain, r.maxChain);
   if (r.won && r.movesLeft === 0) l.lastMoveWins++;
@@ -69,6 +73,10 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'golden', icon: '✨', name: 'Golden Touch', desc: 'Pop 100 golden fruit', target: 100, value: (c) => c.life.golden },
   { id: 'ice', icon: '🧊', name: 'Ice Breaker', desc: 'Crack 150 ice', target: 150, value: (c) => c.life.ice },
   { id: 'world-5', icon: '❄️', name: 'Snow Champion', desc: 'Finish Frosty Falls', target: 5, value: (c) => c.worldsDone },
+  { id: 'pinatas', icon: '🪅', name: 'Piñata Smasher', desc: 'Burst 25 piñatas', target: 25, value: (c) => c.life.pinatas },
+  { id: 'lava', icon: '🌋', name: 'Lava Tamer', desc: 'Cool 60 lava', target: 60, value: (c) => c.life.lava },
+  { id: 'world-7', icon: '🦉', name: 'Night Owl', desc: 'Finish Firefly Night', target: 7, value: (c) => c.worldsDone },
+  { id: 'world-10', icon: '👑', name: 'Fiesta Legend', desc: 'Finish all 10 worlds (level 100!)', target: 10, value: (c) => c.worldsDone },
   { id: 'jets', icon: '🧃', name: 'Juice Master', desc: 'Make 50 Juice Jets', target: 50, value: (c) => c.life.jets },
   { id: 'bees', icon: '🐝', name: 'Bee Keeper', desc: 'Make 30 Busy Bees', target: 30, value: (c) => c.life.bees },
   { id: 'bursts', icon: '💥', name: 'Kaboom!', desc: 'Make 30 Fruit Bursts', target: 30, value: (c) => c.life.bursts },

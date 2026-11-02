@@ -1,4 +1,4 @@
-import { Board, Cell, Gravity } from './core/board';
+import { Board, Cell, Gravity, LAVA } from './core/board';
 import { playMove, playTilt, MoveResult, Step, COCONUT_POINTS } from './core/engine';
 import { LevelDef, createBoard, hasSand } from './core/levels';
 import { starsFor, LEFTOVER_MOVE_BONUS } from './core/scoring';
@@ -73,6 +73,8 @@ export class Game {
     this.specs = goalSpecs(level);
     this.shownSand = this.board.sandLeft();
     this.shownIce = this.board.iceLeft();
+    this.shownPinatas = this.board.pinatasLeft();
+    this.shownLava = this.board.lavaLeft();
     this.busy = true;
     this.active = true;
     this.drag = null;
@@ -155,6 +157,8 @@ export class Game {
   /** Sand still showing on screen (the board itself may be ahead while animations replay). */
   private shownSand = 0;
   private shownIce = 0;
+  private shownPinatas = 0;
+  private shownLava = 0;
 
   private goalsLeft(): number[] {
     return this.specs.map((g) => {
@@ -165,6 +169,8 @@ export class Game {
         case 'golden': return g.count - this.golden;
         case 'orders': return this.cafe ? this.cafe.remaining : 0;
         case 'ice': return this.shownIce;
+        case 'pinata': return this.shownPinatas;
+        case 'lava': return this.shownLava;
       }
     });
   }
@@ -303,6 +309,13 @@ export class Game {
         }
         this.shownSand -= step.sand.length;
         this.shownIce -= step.ice.length;
+        const burst = step.pinatas.filter((p) => p.hp <= 0).length;
+        const cooled = step.cleared.filter((c) => c.kind === LAVA).length;
+        this.shownPinatas -= burst;
+        this.shownLava -= cooled;
+        rep.pinatas += burst;
+        rep.lava += cooled;
+        if (burst || cooled || step.pinatas.length) goalHit = true;
         if (step.ice.length) goalHit = true;
         rep.ice += step.ice.length;
         if (step.sweet && this.cafe) {
@@ -315,6 +328,14 @@ export class Game {
         await this.renderer.playClear(step);
       } else if (step.type === 'fall') {
         await this.renderer.dropTiles(step.falls, step.spawns);
+      } else if (step.type === 'conveyor') {
+        await this.renderer.playConveyor(step);
+      } else if (step.type === 'lava') {
+        this.shownLava++;
+        this.updateHud();
+        await this.renderer.playLava(step);
+      } else if (step.type === 'night') {
+        this.renderer.setLight(step.light);
       } else if (step.type === 'tilt') {
         await this.renderer.playTilt(step.gravity);
       } else if (step.type === 'tide') {

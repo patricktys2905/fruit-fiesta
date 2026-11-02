@@ -32,6 +32,8 @@ export const QUEST_TEMPLATES: QuestTemplate[] = [
   { id: 'customers', icon: '🥤', targets: [5, 8], text: (n) => `Serve ${n} café customers`, amount: (r) => r.customers },
   { id: 'golden', icon: '✨', targets: [10, 20], minLevel: 4, text: (n) => `Pop ${n} golden fruit`, amount: (r) => r.golden },
   { id: 'ice', icon: '🧊', targets: [15, 25], minLevel: 41, text: (n) => 'Crack ' + n + ' ice', amount: (r) => r.ice ?? 0 },
+  { id: 'pinatas', icon: '🪅', targets: [2, 4], minLevel: 51, text: (n) => 'Burst ' + n + ' piñatas', amount: (r) => r.pinatas ?? 0 },
+  { id: 'lava', icon: '🌋', targets: [5, 10], minLevel: 81, text: (n) => 'Cool ' + n + ' lava', amount: (r) => r.lava ?? 0 },
   { id: 'sand', icon: '🏖️', targets: [20, 35], minLevel: 11, text: (n) => `Wash away ${n} sand`, amount: (r) => r.sand },
   { id: 'coconuts', icon: '🥥', targets: [2, 4], minLevel: 13, text: (n) => `Collect ${n} coconuts`, amount: (r) => r.coconuts },
 ];

@@ -1,9 +1,9 @@
 /** A level's goals in a display-friendly form (shared by the HUD and the level card). */
-import { COCONUT } from './core/board';
-import { LevelDef } from './core/levels';
+import { COCONUT, PINATA, LAVA } from './core/board';
+import { LevelDef, pinataCount } from './core/levels';
 import { fruitIconUrl, sandIconUrl, goldenIconUrl, iceIconUrl } from './fruitArt';
 
-export type GoalKey = 'fruit' | 'sand' | 'coconut' | 'golden' | 'orders' | 'ice';
+export type GoalKey = 'fruit' | 'sand' | 'coconut' | 'golden' | 'orders' | 'ice' | 'pinata' | 'lava';
 
 export interface GoalSpec {
   key: GoalKey;
@@ -32,6 +32,10 @@ export function goalSpecs(level: LevelDef): GoalSpec[] {
   if (sand) out.push({ key: 'sand', count: sand, icon: sandIconUrl(), label: 'sand' });
   const ice = iceTotal(level);
   if (ice) out.push({ key: 'ice', count: ice, icon: iceIconUrl(), label: 'ice' });
+  const pins = pinataCount(level);
+  if (pins) out.push({ key: 'pinata', count: pins, icon: fruitIconUrl(PINATA), label: 'piñatas' });
+  const lava = (level.layout ?? []).join('').split('v').length - 1;
+  if (lava) out.push({ key: 'lava', count: lava, icon: fruitIconUrl(LAVA), label: 'lava' });
   if (level.coconuts) out.push({ key: 'coconut', count: level.coconuts, icon: fruitIconUrl(COCONUT), label: 'coconuts' });
   return out;
 }

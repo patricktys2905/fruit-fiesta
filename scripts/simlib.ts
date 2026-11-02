@@ -1,7 +1,7 @@
 /** Bot players for balancing levels. They use the real game engine. */
 import { Board, Cell, Gravity, Tile } from '../src/core/board';
 import { playMove, playTilt, ClearStep, MoveResult } from '../src/core/engine';
-import { LevelDef, createBoard, hasSand, hasIce } from '../src/core/levels';
+import { LevelDef, createBoard, hasSand, hasIce, hasLava, pinataCount } from '../src/core/levels';
 import { mulberry32 } from '../src/core/rng';
 import { starsFor, LEFTOVER_MOVE_BONUS } from '../src/core/scoring';
 import { Cafe } from '../src/core/orders';
@@ -22,6 +22,10 @@ export function cloneBoard(b: Board, seed: number): Board {
   c.tideCounter = b.tideCounter;
   c.tideMax = b.tideMax;
   c.personalities = b.personalities;
+  c.night = b.night;
+  c.light = b.light.map((row) => [...row]);
+  c.lantern = b.lantern;
+  c.conveyors = b.conveyors;
   return c;
 }
 
@@ -47,14 +51,18 @@ export function play(level: LevelDef, seed: number, smart: boolean): PlayResult 
   const wanted = () => (cafe ? cafe.wanted() : level.collect.filter((g) => collected[g.kind] < g.count).map((g) => g.kind));
   const needSand = hasSand(level);
   const needIce = hasIce(level);
+  const needPinatas = pinataCount(level) > 0;
+  const needLava = hasLava(level);
   const goalsDone = () =>
     level.collect.every((g) => collected[g.kind] >= g.count) &&
     (!needSand || board.sandLeft() === 0) &&
     (!needIce || board.iceLeft() === 0) &&
+    (!needPinatas || board.pinatasLeft() === 0) &&
+    (!needLava || board.lavaLeft() === 0) &&
     coconuts >= (level.coconuts ?? 0) &&
     golden >= (level.golden ?? 0) &&
     (!cafe || cafe.done);
-  const hasGoals = level.collect.length > 0 || needSand || needIce || !!level.coconuts || !!cafe || !!level.golden;
+  const hasGoals = level.collect.length > 0 || needSand || needIce || needPinatas || needLava || !!level.coconuts || !!cafe || !!level.golden;
   const ctx = { wantedKinds: wanted, wantSand: () => needSand };
   let specialsMade = 0;
 
@@ -71,7 +79,7 @@ export function play(level: LevelDef, seed: number, smart: boolean): PlayResult 
         const trial = cloneBoard(board, seed + moves);
         const r = run(trial, m);
         const w = new Set(wanted());
-        let v = r.score + r.collected.reduce((s, n, k) => s + (w.has(k) ? n * 60 : 0), 0) + r.sandCleared * 150 + r.iceCracked * 170 + r.coconuts * 1500 - trial.tide * 500 - (r.flooded ? 1e6 : 0);
+        let v = r.score + r.collected.reduce((s, n, k) => s + (w.has(k) ? n * 60 : 0), 0) + r.sandCleared * 150 + r.iceCracked * 170 + r.coconuts * 1500 + r.pinatasBurst * 900 + r.lavaCleared * 250 - trial.lavaLeft() * 120 - trial.tide * 500 - (r.flooded ? 1e6 : 0);
         if (level.coconuts)
           for (let rr = 0; rr < trial.rows; rr++)
             for (let cc = 0; cc < trial.cols; cc++)

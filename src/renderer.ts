@@ -1,5 +1,5 @@
-import { Board, Cell, FallMove, GRAVITY_VEC, MUSH, Spawn, Special, Tile, cellKey } from './core/board';
-import { ClearStep, Cleared, CollectStep, RipenStep, COCONUT_POINTS, TRAIT_NAMES } from './core/engine';
+import { Board, Cell, FallMove, GRAVITY_VEC, LAVA, MUSH, PINATA, Spawn, Special, Tile, cellKey } from './core/board';
+import { ClearStep, Cleared, CollectStep, ConveyorStep, LavaStep, RipenStep, COCONUT_POINTS, LIGHT_MOVES, TRAIT_NAMES } from './core/engine';
 import { FRUITS, makeBeeSprite, makeFruitSprite, makeSandSprite, makeMushSprite, tintSprite } from './fruitArt';
 import { Tweener, easeOutQuad, easeInBack, easeOutBack, fallEase, wait } from './tween';
 import { sfx } from './audio';
@@ -14,6 +14,7 @@ interface Vis {
   unripe?: number;
   golden?: boolean;
   ice?: number;
+  hp?: number;
 }
 
 type PType = 'drop' | 'seed' | 'spark' | 'bubble' | 'wedge' | 'leaf' | 'glint';
@@ -68,6 +69,12 @@ export class Renderer {
   private tideOn = false;
   /** Grape juice puddles as shown. */
   private puddle: boolean[][] = [];
+  /** Night light as shown, and which cells hold lanterns. */
+  private light: number[][] = [];
+  private lantern: boolean[][] = [];
+  private nightOn = false;
+  private dark: HTMLCanvasElement | null = null;
+  private fireflies: { x: number; y: number; vx: number; vy: number; ph: number }[] = [];
   private vis = new Map<number, Vis>();
   readonly tweens = new Tweener();
   private particles: Particle[] = [];
@@ -97,6 +104,10 @@ export class Renderer {
     this.hint = null;
     this.sand = board.sand.map((row) => [...row]);
     this.puddle = board.puddle.map((row) => [...row]);
+    this.light = board.light.map((row) => [...row]);
+    this.lantern = board.lantern;
+    this.nightOn = board.night;
+    this.fireflies = Array.from({ length: board.night ? 14 : 0 }, () => ({ x: Math.random() * board.cols, y: Math.random() * board.rows, vx: (Math.random() - 0.5) * 0.0008, vy: (Math.random() - 0.5) * 0.0008, ph: Math.random() * 6 }));
     this.tideOn = board.tideEvery > 0;
     this.tideShown = board.tide;
     this.tideNext = board.tideEvery - board.tideCounter;
@@ -106,7 +117,7 @@ export class Renderer {
       for (let c = 0; c < board.cols; c++) {
         const t = board.grid[r][c];
         if (!t) continue;
-        const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special, unripe: t.unripe, golden: t.golden, ice: t.ice };
+        const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special, unripe: t.unripe, golden: t.golden, ice: t.ice, hp: t.hp };
         this.vis.set(t.id, v);
         intro.push(this.tweens.to(v, { y: r }, 420 + r * 25, fallEase, (board.rows - r) * 30 + c * 12));
       }
@@ -184,6 +195,128 @@ export class Renderer {
       this.tinted.set(key, s);
     }
     return s;
+  }
+
+  /** Conveyor rows slide one step; wrapped fruit slides in from the opposite edge. */
+  async playConveyor(step: ConveyorStep): Promise<void> {
+    sfx.swap();
+    await Promise.all(
+      step.moves.map((m) => {
+        const v = this.vis.get(m.tile.id);
+        if (!v) return Promise.resolve();
+        if (m.wrap) v.x = m.toC + (m.toC > m.fromC ? -1 : 1);
+        return this.tweens.to(v, { x: m.toC }, 260, easeOutQuad);
+      }),
+    );
+  }
+
+  /** Lava swallows a fruit. */
+  async playLava(step: LavaStep): Promise<void> {
+    const v = this.vis.get(step.tile.id);
+    if (!v) return;
+    v.kind = LAVA;
+    v.golden = false;
+    v.unripe = undefined;
+    const x = this.px(step.c), y = this.py(step.r);
+    this.emit('drop', x, y, '#ff7a1f', 10, { speed: 0.2 });
+    this.texts.push({ text: '🔥 Lava spreads!', x, y: y - this.tile * 0.6, vy: -0.03, life: 0, max: 900, color: '#ffb36b', size: this.tile * 0.36, big: false });
+    sfx.boom();
+    await this.tweens.to(v, { scale: 1.3 }, 120, easeOutQuad);
+    await this.tweens.to(v, { scale: 1 }, 240, easeOutBack);
+  }
+
+  /** Night: light levels after a move. */
+  setLight(light: number[][]): void {
+    this.light = light.map((r) => [...r]);
+  }
+
+  /** Darkness with soft holes where it's lit, plus lanterns and fireflies. */
+  private drawNight(now: number, board: Board, dt: number): void {
+    if (!this.nightOn) return;
+    const ctx = this.ctx, T = this.tile;
+    const w = Math.ceil(this.w), h = Math.ceil(this.h);
+    if (!this.dark || this.dark.width !== w || this.dark.height !== h) {
+      this.dark = document.createElement('canvas');
+      this.dark.width = w;
+      this.dark.height = h;
+    }
+    const d = this.dark.getContext('2d')!;
+    d.globalCompositeOperation = 'source-over';
+    d.clearRect(0, 0, w, h);
+    d.fillStyle = 'rgba(12,16,48,0.86)';
+    d.fillRect(this.ox - 8, this.oy - 8, T * board.cols + 16, T * board.rows + 16);
+    d.globalCompositeOperation = 'destination-out';
+    for (let r = 0; r < board.rows; r++)
+      for (let c = 0; c < board.cols; c++) {
+        const l = this.light[r]?.[c] ?? 0;
+        if (l <= 0) continue;
+        const x = this.px(c), y = this.py(r), rad = T * 0.95;
+        const g = d.createRadialGradient(x, y, T * 0.2, x, y, rad);
+        g.addColorStop(0, `rgba(0,0,0,${Math.min(1, 0.45 + l * 0.15)})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        d.fillStyle = g;
+        d.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+      }
+    ctx.drawImage(this.dark, 0, 0, w, h);
+    // lanterns
+    for (let r = 0; r < board.rows; r++)
+      for (let c = 0; c < board.cols; c++)
+        if (this.lantern[r]?.[c]) {
+          const x = this.px(c) + T * 0.3, y = this.py(r) - T * 0.3;
+          const flick = 0.85 + 0.15 * Math.sin(now / 90 + r * 3 + c);
+          const g = ctx.createRadialGradient(x, y, 1, x, y, T * 0.35);
+          g.addColorStop(0, `rgba(255,220,120,${0.9 * flick})`);
+          g.addColorStop(1, 'rgba(255,180,60,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(x, y, T * 0.35, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.font = `${Math.round(T * 0.34)}px system-ui`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('🏮', x, y);
+        }
+    // fireflies
+    for (const f of this.fireflies) {
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      if (f.x < 0 || f.x > board.cols) f.vx *= -1;
+      if (f.y < 0 || f.y > board.rows) f.vy *= -1;
+      if (Math.random() < 0.01) { f.vx = (Math.random() - 0.5) * 0.0009; f.vy = (Math.random() - 0.5) * 0.0009; }
+      const a = 0.4 + 0.6 * Math.max(0, Math.sin(now / 300 + f.ph));
+      const x = this.ox + f.x * T, y = this.oy + f.y * T;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, T * 0.18);
+      g.addColorStop(0, `rgba(230,255,140,${a})`);
+      g.addColorStop(1, 'rgba(200,255,100,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, T * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /** Conveyor belts drawn under the fruit, with chevrons showing which way they run. */
+  private drawBelts(now: number, board: Board): void {
+    const ctx = this.ctx, T = this.tile;
+    for (const { row, dir } of board.conveyors) {
+      const y = this.oy + row * T;
+      ctx.fillStyle = 'rgba(90,70,110,0.35)';
+      ctx.fillRect(this.ox, y + 3, T * board.cols, T - 6);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(this.ox, y + 3, T * board.cols, T - 6);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = Math.max(2, T * 0.06);
+      const off = ((now / 25) * dir) % (T * 0.5);
+      for (let x = this.ox - T + off; x < this.ox + T * (board.cols + 1); x += T * 0.5) {
+        ctx.beginPath();
+        ctx.moveTo(x, y + T * 0.15);
+        ctx.lineTo(x + dir * T * 0.14, y + T * 0.5);
+        ctx.lineTo(x, y + T * 0.85);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   /** The tide moves: animate the water level. */
@@ -497,6 +630,32 @@ export class Renderer {
         }),
       );
     }
+    // Piñatas lose a heart (and burst in confetti at zero).
+    for (const pn of step.pinatas) {
+      anims.push(
+        wait(D(pn) + 30).then(async () => {
+          const v = this.vis.get(pn.tile.id);
+          const x = this.px(pn.c), y = this.py(pn.r);
+          const confetti = ['#ff5c8a', '#ffd23f', '#3fd0c9', '#ff9a3c', '#a456ff', '#7bd13b'];
+          if (pn.hp <= 0) {
+            confetti.forEach((c) => this.emit('wedge', x, y, c, 5, { speed: 0.32, size: 6, life: 1000 }));
+            this.texts.push({ text: '¡Olé!', x, y: y - T * 0.6, vy: -0.03, life: 0, max: 1000, color: '#fff36b', size: T * 0.45, big: false });
+            sfx.win();
+          } else {
+            confetti.forEach((c) => this.emit('wedge', x, y, c, 1, { speed: 0.18, size: 5, life: 700 }));
+            sfx.boom();
+          }
+          if (v) {
+            v.hp = pn.hp;
+            await this.tweens.to(v, { scale: 1.25 }, 80, easeOutQuad);
+            await this.tweens.to(v, { scale: 1 }, 220, easeOutBack);
+          }
+        }),
+      );
+    }
+    // Night: matched areas light up.
+    if (step.lit.length) later(80, () => { for (const c of step.lit) if (this.light[c.r]) this.light[c.r][c.c] = LIGHT_MOVES; });
+
     // Ice cracks (the fruit stays put).
     for (const ic of step.ice) {
       anims.push(
@@ -739,6 +898,8 @@ export class Renderer {
         ctx.restore();
       }
     }
+    this.drawBelts(now, board);
+
     // grape juice puddles
     for (let r = 0; r < board.rows; r++)
       for (let c = 0; c < board.cols; c++)
@@ -787,6 +948,7 @@ export class Renderer {
     ctx.restore();
 
     this.drawWater(now, board);
+    this.drawNight(now, board, 16);
 
     // effects above tiles
     for (const f of this.fx) {
@@ -907,6 +1069,22 @@ export class Renderer {
         ctx.lineTo(sx + Math.cos(aa) * rr, sy + Math.sin(aa) * rr);
       }
       ctx.fill();
+    }
+    if (v.kind === LAVA) {
+      const g = ctx.createRadialGradient(x, y, size * 0.2, x, y, size * 0.65);
+      g.addColorStop(0, `rgba(255,120,30,${0.25 + 0.15 * Math.sin(now / 200 + v.x)})`);
+      g.addColorStop(1, 'rgba(255,80,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, size * 0.65, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (v.kind === PINATA) {
+      const hp = v.hp ?? 3;
+      ctx.font = `${Math.round(size * 0.22)}px system-ui`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < 3; i++) ctx.fillText(i < hp ? '❤️' : '🤍', x + (i - 1) * size * 0.24, y - size * 0.42);
     }
     if (v.ice) {
       // ice cube over frozen fruit: thicker for two layers

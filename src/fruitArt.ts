@@ -372,6 +372,41 @@ function coconut(ctx: Ctx) {
   shine(ctx, 0.36, 0.42, 0.08, 0.04, -0.6, 0.3);
 }
 
+/** Fallback piñata: a round frilly party ball in rainbow stripes. */
+function pinata(ctx: Ctx) {
+  const cols = ['#ff5c8a', '#ffd23f', '#3fd0c9', '#ff9a3c', '#a456ff'];
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0.5, 0.55, 0.36, 0, Math.PI * 2);
+  ctx.clip();
+  cols.forEach((c, i) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(0, 0.19 + i * 0.145, 1, 0.15);
+  });
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(0.5, 0.55, 0.36, 0, Math.PI * 2);
+  outline(ctx, 'rgba(90,20,60,0.5)');
+  ctx.fillStyle = '#3b2412';
+  ctx.beginPath(); ctx.arc(0.42, 0.5, 0.03, 0, Math.PI * 2); ctx.arc(0.58, 0.5, 0.03, 0, Math.PI * 2); ctx.fill();
+  shine(ctx, 0.36, 0.38, 0.08, 0.04, -0.6, 0.45);
+}
+
+/** Fallback lava: a dark rock blob with glowing cracks. */
+function lava(ctx: Ctx) {
+  ctx.beginPath();
+  ctx.ellipse(0.5, 0.56, 0.38, 0.33, 0, 0, Math.PI * 2);
+  ctx.fillStyle = radial(ctx, 0.5, 0.6, 0.45, [[0, '#ff8a1f'], [0.5, '#a2310e'], [1, '#2a1410']]);
+  ctx.fill();
+  outline(ctx, 'rgba(30,10,0,0.7)');
+  ctx.strokeStyle = '#ffd04a';
+  ctx.lineWidth = 0.03;
+  ctx.beginPath();
+  ctx.moveTo(0.25, 0.5); ctx.lineTo(0.42, 0.6); ctx.lineTo(0.5, 0.45); ctx.lineTo(0.66, 0.62); ctx.lineTo(0.78, 0.52);
+  ctx.moveTo(0.42, 0.6); ctx.lineTo(0.38, 0.78);
+  ctx.stroke();
+}
+
 const DRAW = [strawberry, orange, lemon, kiwi, grape, blueberry];
 
 function blank(px: number) {
@@ -391,7 +426,7 @@ function drawArt(ctx: Ctx, img: HTMLImageElement, size: number, pad = 0.04) {
 /** Sprite for a fruit kind (0..5), the Rainbow Smoothie (-1) or a coconut (-2). Uses Gemini art if present. */
 export function makeFruitSprite(kind: number, px: number): HTMLCanvasElement {
   const { cv, ctx } = blank(px);
-  const img = art(kind === -2 ? 'coconut' : kind < 0 ? 'smoothie' : `fruit-${kind}`);
+  const img = art(kind === -2 ? 'coconut' : kind === -4 ? 'pinata' : kind === -5 ? 'lava' : kind < 0 ? 'smoothie' : `fruit-${kind}`);
   ctx.fillStyle = 'rgba(0,40,60,0.22)';
   ctx.beginPath();
   ctx.ellipse(cv.width * 0.5, cv.height * 0.92, cv.width * 0.3, cv.height * 0.06, 0, 0, Math.PI * 2);
@@ -401,7 +436,7 @@ export function makeFruitSprite(kind: number, px: number): HTMLCanvasElement {
     return cv;
   }
   ctx.scale(cv.width, cv.height);
-  (kind === -2 ? coconut : kind < 0 ? smoothie : DRAW[kind])(ctx);
+  (kind === -2 ? coconut : kind === -4 ? pinata : kind === -5 ? lava : kind < 0 ? smoothie : DRAW[kind])(ctx);
   return cv;
 }
 

@@ -6,7 +6,7 @@ import { LEVELS, WORLDS } from '../src/core/levels';
 import { summarize } from './simlib';
 
 const FILE = 'src/core/tuning.json';
-const tuning: Record<string, { moves: number; stars: [number, number, number] }> = JSON.parse(fs.readFileSync(FILE, 'utf8') || '{}');
+const tuning: Record<string, Record<string, unknown>> = JSON.parse(fs.readFileSync(FILE, 'utf8') || '{}');
 
 /** Target win rate for the look-ahead bot, by world: gently harder each world. */
 const TARGET: Record<number, [number, number]> = {
@@ -36,15 +36,27 @@ for (const level of LEVELS.filter((l) => l.id >= from && l.id <= to)) {
   for (let i = 0; i < 8; i++) {
     if ((s.smartWin < lo || s.randWin < rlo) && level.moves < MAX_MOVES) level.moves = Math.min(MAX_MOVES, level.moves + (s.smartWin < lo - 0.2 || s.randWin < rlo - 0.15 ? 4 : 2));
     else if ((s.smartWin > hi || s.randWin > rhi) && level.moves - 2 >= MIN_MOVES) level.moves -= 2;
+    else if ((s.smartWin > hi || s.randWin > rhi) && harden(level)) { /* bigger goal instead of fewer moves */ }
     else break;
     s = summarize(level, 50, 24);
   }  // Star curve: 1★ is just finishing the goals (kept low for goal levels), 2★/3★ from winning scores.
-  const goalLevel = level.collect.length || level.cafe || level.coconuts || level.golden || level.layout?.some((r) => /[sSiI]/.test(r));
+  const goalLevel = level.collect.length || level.cafe || level.coconuts || level.golden || level.layout?.some((r) => /[sSiIpv]/.test(r));
   const one = goalLevel ? Math.min(level.stars[0], Math.max(500, Math.floor(s.minWinScore / 500) * 500)) : level.stars[0];
   const two = Math.max(one + 500, s.suggest[0]);
   const three = Math.max(two + 1000, s.suggest[1]);
   level.stars = [one, two, three];
-  tuning[level.id] = { moves: level.moves, stars: level.stars };
+  tuning[level.id] = { moves: level.moves, stars: level.stars, collect: level.collect, golden: level.golden, cafe: level.cafe };
   fs.writeFileSync(FILE, JSON.stringify(tuning, null, 1));
   console.log(`L${String(level.id).padStart(3)} ${level.name.padEnd(16)} moves ${String(level.moves).padStart(2)} | smart ${(s.smartWin * 100).toFixed(0).padStart(3)}% rand ${(s.randWin * 100).toFixed(0).padStart(3)}% | stars ${level.stars.join('/')}`);
+}
+
+/** Too easy even at the shortest length: ask for more. Returns false if nothing can grow. */
+function harden(level: (typeof LEVELS)[number]): boolean {
+  let changed = false;
+  if (level.cafe && level.cafe.serve < 10) { level.cafe = { ...level.cafe, serve: level.cafe.serve + 1 }; changed = true; }
+  if (level.collect.length) { level.collect = level.collect.map((g) => ({ ...g, count: Math.round(g.count * 1.25) })); changed = true; }
+  if (level.golden) { level.golden = Math.round(level.golden * 1.25); changed = true; }
+  const fixedGoal = level.cafe || level.collect.length || level.golden || level.coconuts || level.layout?.some((r) => /[sSiIpv]/.test(r));
+  if (!fixedGoal) { level.stars = [Math.round((level.stars[0] * 1.3) / 500) * 500, level.stars[1], level.stars[2]]; changed = true; }
+  return changed;
 }

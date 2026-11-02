@@ -13,7 +13,7 @@ describe('level data', () => {
       if (level.layout) {
         expect(level.layout.length).toBe(level.rows);
         for (const row of level.layout) expect(row.length).toBe(level.cols);
-        expect(level.layout.join('')).toMatch(/^[ .sSoiI#]+$/);
+        expect(level.layout.join('')).toMatch(/^[ .sSoiIpvl#]+$/);
       }
       expect(level.stars[0]).toBeLessThan(level.stars[1]);
       expect(level.stars[1]).toBeLessThan(level.stars[2]);

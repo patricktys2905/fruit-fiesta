@@ -13,7 +13,7 @@ import path from 'node:path';
 
 const RAW = path.resolve('art-src/raw');
 const OUT = path.resolve('src/art');
-const SPRITE = /^(fruit-[0-5]|smoothie|bee|coconut|logo|customer-[a-z]+)$/;
+const SPRITE = /^(fruit-[0-5]|smoothie|bee|coconut|pinata|lava|logo|customer-[a-z]+)$/;
 const BACKGROUND = /^bg-(game|title|map(-\d+)?)$/;
 
 fs.mkdirSync(OUT, { recursive: true });
