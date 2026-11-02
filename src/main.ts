@@ -9,6 +9,7 @@ import { sfx } from './audio';
 import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl } from './fruitArt';
 import { artReady, artUrl } from './art';
 import { setupPwa, toast } from './pwa';
+import { Meta } from './metaUi';
 import { loadProgress, saveProgress, isUnlocked } from './save';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -20,9 +21,12 @@ function show(name: ScreenName) {
   document.body.dataset.screen = name;
   $('modal').classList.add('hidden');
   $('level-card').classList.add('hidden');
+  $('panel').classList.add('hidden');
+  $('confirm').classList.add('hidden');
 }
 
 const progress = loadProgress();
+const meta = new Meta(progress);
 const renderer = new Renderer($<HTMLCanvasElement>('board'));
 const hud = new Hud();
 let current: LevelDef = LEVELS[0];
@@ -251,13 +255,28 @@ $('lc-play').onclick = () => {
 // ---------- game ----------
 function startLevel(level: LevelDef) {
   sfx.unlock();
+  if (!meta.canStart()) {
+    toast('💔 Out of lives! Check Daily Quests for more');
+    if (document.body.dataset.screen !== 'levels') openLevels();
+    return;
+  }
   current = level;
   show('game');
   requestAnimationFrame(() => void game.start(level));
 }
 
 $('btn-back').onclick = () => {
+  if (game.inProgress && game.movesMade > 0) {
+    $('confirm').classList.remove('hidden');
+    return;
+  }
   game.stop();
+  openLevels();
+};
+$('confirm-stay').onclick = () => $('confirm').classList.add('hidden');
+$('confirm-leave').onclick = () => {
+  game.stop();
+  meta.loseLife();
   openLevels();
 };
 
@@ -295,7 +314,8 @@ function onLevelEnd(r: LevelResult) {
   $('modal-score').textContent = `Score ${r.score.toLocaleString()}`;
   $('modal-note').textContent = r.won
     ? r.score > prevBest ? 'New best score!' : `Best: ${prevBest.toLocaleString()}`
-    : 'So close! Have another go.';
+    : 'So close! You lost a life 💔';
+  meta.onLevelEnd(r.report);
   const next = LEVELS.find((l) => l.id === r.level.id + 1);
   $('btn-modal-next').classList.toggle('hidden', !r.won || !next);
   $('modal').classList.remove('hidden');

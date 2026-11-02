@@ -52,12 +52,17 @@
 
     <!-- Title screen -->
     <section id="screen-title" class="screen">
+      <div class="title-top"><span id="title-lives" class="lives-pill"></span></div>
       <div class="logo" id="logo">
         <span class="logo-fruit">Fruit</span>
         <span class="logo-fiesta">Fiesta!</span>
       </div>
       <div id="title-fruits" class="title-fruits"></div>
       <button id="btn-play" class="big-btn">Play</button>
+      <div class="title-row">
+        <button id="btn-daily" class="pill-btn">📅 Daily Quests <span id="daily-badge" class="badge hidden"></span></button>
+        <button id="btn-awards" class="pill-btn">🏆 Awards</button>
+      </div>
       <p class="tagline">Match, splash &amp; party with the family</p>
       <button id="btn-install" class="install-btn hidden">📲 Install app</button>
       <p id="ios-hint" class="ios-hint hidden">To install: tap <b>Share</b> then <b>Add to Home Screen</b></p>
@@ -65,12 +70,39 @@
 
     <div id="toast" class="toast hidden" role="status"></div>
 
+    <!-- Daily quests / awards panel -->
+    <div id="panel" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="card panel-card">
+        <button id="panel-close" class="lc-close" aria-label="Close">×</button>
+        <h2 id="panel-title"></h2>
+        <p id="panel-sub" class="panel-sub"></p>
+        <div id="panel-body" class="panel-body"></div>
+      </div>
+    </div>
+
+    <!-- Leave level confirmation -->
+    <div id="confirm" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Leave level?</h2>
+        <p class="confirm-text">You'll lose a life ❤️</p>
+        <div class="modal-btns">
+          <button id="confirm-leave" class="mid-btn ghost">Leave</button>
+          <button id="confirm-stay" class="mid-btn">Keep playing</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Level select -->
     <section id="screen-levels" class="screen hidden">
       <div class="levels-head">
         <button id="btn-levels-back" class="icon-btn" aria-label="Back">‹</button>
         <div class="world-banner"><span class="world-sub" id="world-sub">World 1</span><span class="world-name" id="world-name">Sunny Isle</span></div>
         <span id="total-stars" class="total-stars"></span>
+      </div>
+      <div class="meta-bar">
+        <span id="map-lives" class="lives-pill"></span>
+        <button id="map-daily" class="pill-btn small">📅 <span id="map-daily-count"></span></button>
+        <button id="map-awards" class="pill-btn small">🏆 <span id="map-awards-count"></span></button>
       </div>
       <div class="map-scroll" id="map-scroll">
         <div class="map-wrap">
@@ -102,6 +134,7 @@
           <span id="lc-tip" class="lc-tip"></span>
         </div>
         <button id="lc-play" class="big-btn lc-play">Play</button>
+        <p id="lc-lives" class="lc-lives"></p>
       </div>
     </div>
 

@@ -6,6 +6,7 @@ import { Renderer } from './renderer';
 import { Hud } from './hud';
 import { sfx } from './audio';
 import { GoalSpec, goalSpecs } from './goals';
+import { LevelReport, emptyReport } from './meta/report';
 import { wait } from './tween';
 
 export interface LevelResult {
@@ -13,6 +14,7 @@ export interface LevelResult {
   won: boolean;
   score: number;
   stars: number;
+  report: LevelReport;
 }
 
 const CHEERS = ['', '', 'Juicy!', 'Tasty!', 'Fruitastic!', 'Smoothie Storm!', 'FIESTA!!'];
@@ -25,6 +27,9 @@ export class Game {
   private moves = 0;
   private collected: number[] = [];
   private coconuts = 0;
+  private report: LevelReport = emptyReport(0);
+  /** Moves made in the current attempt (quitting after a move costs a life). */
+  movesMade = 0;
   private specs: GoalSpec[] = [];
   private busy = true;
   private active = false;
@@ -52,6 +57,8 @@ export class Game {
     this.moves = level.moves;
     this.collected = Array(6).fill(0);
     this.coconuts = 0;
+    this.report = emptyReport(level.id);
+    this.movesMade = 0;
     this.board = createBoard(level, seedOverride ?? level.seed);
     this.specs = goalSpecs(level);
     this.shownSand = this.board.sandLeft();
@@ -177,6 +184,7 @@ export class Game {
     }
 
     this.moves--;
+    this.movesMade++;
     this.updateHud();
     await this.replay(result.steps, session);
     if (session !== this.session) return;
@@ -194,8 +202,20 @@ export class Game {
       if (step.type === 'clear') {
         this.score += step.score;
         let goalHit = false;
+        const rep = this.report;
+        rep.maxChain = Math.max(rep.maxChain, step.chain);
+        if (step.combo) rep.combos++;
+        for (const cr of step.created) {
+          if (cr.special === 'jetH' || cr.special === 'jetV') rep.jets++;
+          else if (cr.special === 'bee') rep.bees++;
+          else if (cr.special === 'bomb') rep.bursts++;
+          else rep.smoothies++;
+        }
+        rep.sand += step.sand.length;
         for (const cl of step.cleared) {
           if (cl.kind < 0) continue;
+          rep.fruit++;
+          rep.fruitByKind[cl.kind]++;
           this.collected[cl.kind]++;
           if (this.level.collect.some((g) => g.kind === cl.kind)) goalHit = true;
         }
@@ -225,6 +245,7 @@ export class Game {
         await this.renderer.dropTiles(step.falls, step.spawns);
       } else if (step.type === 'collect') {
         this.coconuts += step.items.length;
+        this.report.coconuts += step.items.length;
         this.score += step.items.length * COCONUT_POINTS;
         this.updateHud();
         this.hud.bump();
@@ -241,8 +262,14 @@ export class Game {
     return this.score >= this.level.stars[0] && this.goalsLeft().every((n) => n <= 0);
   }
 
+  /** True while a level is being played (used to warn before quitting). */
+  get inProgress(): boolean {
+    return this.active;
+  }
+
   private async finish(won: boolean, session: number): Promise<void> {
     this.active = false;
+    this.report.movesLeft = this.moves;
     if (won && this.moves > 0) {
       const bonus = this.moves * LEFTOVER_MOVE_BONUS;
       this.renderer.banner(`Fiesta Bonus +${bonus.toLocaleString()}`, '#ffe36b');
@@ -255,6 +282,8 @@ export class Game {
       await wait(500);
     }
     if (session !== this.session) return;
-    this.onEnd({ level: this.level, won, score: this.score, stars: won ? starsFor(this.score, this.level.stars) : 0 });
+    const stars = won ? starsFor(this.score, this.level.stars) : 0;
+    Object.assign(this.report, { won, stars, score: this.score });
+    this.onEnd({ level: this.level, won, score: this.score, stars, report: this.report });
   }
 }
