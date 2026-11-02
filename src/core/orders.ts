@@ -147,6 +147,11 @@ export class Cafe {
     return { left, arrived: this.fill() };
   }
 
+  /** Strawberry "Sweet!" personality: waiting customers get a little more patient. */
+  soothe(n: number): void {
+    for (const o of this.active) o.patience = Math.min(o.maxPatience, o.patience + n);
+  }
+
   /** Fruit kinds the waiting customers still need (for bees and bots). */
   wanted(): number[] {
     return [...new Set(this.active.flatMap((o) => o.needs.filter((n) => n.left > 0).map((n) => n.kind)))];

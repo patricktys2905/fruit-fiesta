@@ -6,7 +6,7 @@ import { Renderer } from './renderer';
 import { Hud } from './hud';
 import { Game, LevelResult } from './game';
 import { sfx } from './audio';
-import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl, goldenIconUrl } from './fruitArt';
+import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl, goldenIconUrl, iceIconUrl } from './fruitArt';
 import { artReady, artUrl } from './art';
 import { setupPwa, toast } from './pwa';
 import { Meta } from './metaUi';
@@ -64,6 +64,7 @@ $('btn-play').onclick = () => {
 /** Picture shown on a level's map stop and card: its main goal. */
 function levelIcon(l: LevelDef): string {
   if (l.cafe) return fruitIconUrl(-1);
+  if (l.layout?.some((r) => /[iI]/.test(r))) return iceIconUrl();
   if (l.golden) return goldenIconUrl();
   if (l.collect[0]) return fruitIconUrl(l.collect[0].kind);
   if (l.coconuts) return fruitIconUrl(COCONUT);
@@ -242,6 +243,8 @@ function openLevelCard(lvl: LevelDef) {
   if (lvl.ripen) tips.push('Green fruit ripens into golden fruit worth double, but spoils if left too long');
   if (lvl.tide) tips.push('The tide rises every few moves: match at the waterline to push it back');
   if (lvl.tilt) tips.push('Use the tilt buttons to change which way fruit falls');
+  if (lvl.layout?.some((r) => /[iI]/.test(r))) tips.push('Frozen fruit can\'t move: match with it to crack the ice');
+  if (lvl.personalities) tips.push('Fruit powers: 🍋 zing sand · 🥝 ripen · 🍇 bonus puddles · 🍊 pop one more · 🍓 calm customers · 🫐 chill ice');
   if (hasSand(lvl)) tips.push('Match fruit on the sand to wash it away');
   if (lvl.coconuts) tips.push('Drop coconuts to the bottom to collect them');
   $('lc-tip').textContent = tips.join(' · ');

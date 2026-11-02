@@ -542,6 +542,27 @@ export function goldenIconUrl(): string {
   return goldenIcon;
 }
 
+let iceIcon = '';
+/** Goal icon: a strawberry frozen in an ice cube. */
+export function iceIconUrl(): string {
+  if (!iceIcon) {
+    const { cv, ctx } = blank(96);
+    ctx.drawImage(makeFruitSprite(0, 96), 10, 10, 76, 76);
+    ctx.fillStyle = 'rgba(170,225,255,0.6)';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(22, 8); ctx.arcTo(88, 8, 88, 88, 16); ctx.arcTo(88, 88, 8, 88, 16); ctx.arcTo(8, 88, 8, 8, 16); ctx.arcTo(8, 8, 88, 8, 16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(18, 16, 22, 8);
+    iceIcon = cv.toDataURL();
+  }
+  return iceIcon;
+}
+
 let sandIcon = '';
 export function sandIconUrl(): string {
   if (!sandIcon) sandIcon = makeSandSprite(2, 96).toDataURL();

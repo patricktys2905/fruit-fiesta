@@ -52,7 +52,38 @@ export interface ClearStep {
   combo: boolean;
   /** Sand layers washed away this step (a cell can appear once per layer removed). */
   sand: Cell[];
+  /** Ice layers cracked this step (the fruit stays). */
+  ice: IceCrack[];
+  /** Fruit Personalities that fired this step. */
+  traits: Trait[];
+  /** Unripe fruit a kiwi helped ripen (now golden). */
+  grown: Tile[];
+  /** Grape puddles left behind / used up this step. */
+  puddlesAdded: Cell[];
+  puddlesUsed: Cell[];
+  /** Strawberry matches this step (they soothe café customers). */
+  sweet: number;
 }
+
+/** A fruit's personality firing: shown as a little label on the board. */
+export interface Trait {
+  kind: number;
+  at: Cell;
+  /** Cells it affected (orange zest pop, lemon zing, etc). */
+  cells: Cell[];
+}
+
+export interface IceCrack {
+  r: number;
+  c: number;
+  tile: Tile;
+  /** Layers left after this crack. */
+  left: number;
+}
+
+export const TRAIT_NAMES = ['Sweet!', 'Zest!', 'Zing!', 'Grow!', 'Juicy!', 'Chill!'];
+export const ICE_POINTS = 80;
+export const PUDDLE_POINTS = 150;
 
 export interface FallStep {
   type: 'fall';
@@ -114,6 +145,9 @@ export interface MoveResult {
   coconuts: number;
   /** The tide reached the flood line (level lost). */
   flooded: boolean;
+  iceCracked: number;
+  /** Strawberry matches (café customers get calmer). */
+  sweet: number;
 }
 
 export interface EngineCtx {
@@ -163,6 +197,14 @@ class StepBuilder {
   matchedCount = 0;
   /** Cells that were part of a match (mush next to them gets cleaned up). */
   matchedCells: Cell[] = [];
+  /** Matched groups (for Fruit Personalities). */
+  groups: MatchGroup[] = [];
+  traits: Trait[] = [];
+  grown: Tile[] = [];
+  extraSand: Cell[] = [];
+  iceHits: Cell[] = [];
+  newPuddles: Cell[] = [];
+  sweet = 0;
   score = 0;
 
   constructor(private board: Board, private ctx: EngineCtx, readonly chain: number) {}
@@ -183,7 +225,74 @@ class StepBuilder {
     this.add(cell);
   }
 
+  /** Fruit Personalities: each matched group of a fruit does its little thing. */
+  private personalities(): void {
+    if (!this.board.personalities) return;
+    const near = (cells: Cell[]) => {
+      const inGroup = new Set(cells.map((c) => cellKey(c.r, c.c)));
+      const out = new Map<number, Cell>();
+      for (const { r, c } of cells)
+        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const k = cellKey(r + dr, c + dc);
+          if (!inGroup.has(k) && this.board.inBounds({ r: r + dr, c: c + dc })) out.set(k, { r: r + dr, c: c + dc });
+        }
+      return [...out.values()];
+    };
+    for (const g of this.groups) {
+      const at = g.cells[Math.floor(g.cells.length / 2)];
+      const around = near(g.cells);
+      const hit: Cell[] = [];
+      switch (g.kind) {
+        case 0: // strawberry: sweetens waiting café customers
+          this.sweet++;
+          break;
+        case 1: { // orange: zest pops one fruit next to the match
+          const pool = around.filter((c) => {
+            const t = this.board.get(c.r, c.c);
+            return t && t.kind >= 0 && !t.special && !this.clear.has(cellKey(c.r, c.c)) && !this.protect.has(cellKey(c.r, c.c));
+          });
+          if (pool.length) {
+            const pickCell = pool[randInt(this.board.rng, pool.length)];
+            this.add(pickCell);
+            hit.push(pickCell);
+          }
+          break;
+        }
+        case 2: // lemon: zing washes sand next to the match
+          for (const c of around) if (this.board.sand[c.r][c.c] > 0) { this.extraSand.push(c); hit.push(c); }
+          break;
+        case 3: // kiwi: helps nearby green fruit ripen
+          for (const c of around) {
+            const t = this.board.get(c.r, c.c);
+            if (t?.unripe) {
+              t.unripe--;
+              if (t.unripe <= 0) {
+                delete t.unripe;
+                t.golden = true;
+                t.age = 0;
+              }
+              this.grown.push(t);
+              hit.push(c);
+            }
+          }
+          break;
+        case 4: // grape: leaves juice puddles
+          this.newPuddles.push(...g.cells);
+          break;
+        case 5: // blueberry: chills nearby ice (and cleans mush)
+          for (const c of around) {
+            const t = this.board.get(c.r, c.c);
+            if (t?.ice) { this.iceHits.push(c); hit.push(c); }
+            else if (t?.kind === MUSH) { this.add(c); hit.push(c); }
+          }
+          break;
+      }
+      this.traits.push({ kind: g.kind, at, cells: hit });
+    }
+  }
+
   run(): void {
+    this.personalities();
     // Matching next to mush cleans it up.
     for (const { r, c } of this.matchedCells)
       for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -318,6 +427,7 @@ class StepBuilder {
       }
       if (keep) this.protect.add(cellKey(keep.r, keep.c));
       this.matchedCells.push(...g.cells);
+      this.groups.push(g);
       for (const cell of g.cells) {
         if (keep && cell.r === keep.r && cell.c === keep.c) continue;
         this.add(cell);
@@ -389,6 +499,26 @@ class StepBuilder {
   }
 
   finalize(board: Board, collected: number[], combo: boolean): ClearStep {
+    // Frozen fruit: clearing cracks a layer of ice instead of removing the fruit.
+    const ice: IceCrack[] = [];
+    for (const [k, cell] of [...this.clear]) {
+      const t = board.get(cell.r, cell.c);
+      if (t?.ice) {
+        t.ice--;
+        if (!t.ice) delete t.ice;
+        ice.push({ r: cell.r, c: cell.c, tile: t, left: t.ice ?? 0 });
+        this.clear.delete(k);
+      }
+    }
+    for (const cell of this.iceHits) {
+      const t = board.get(cell.r, cell.c);
+      if (t?.ice && !ice.some((c) => c.r === cell.r && c.c === cell.c)) {
+        t.ice--;
+        if (!t.ice) delete t.ice;
+        ice.push({ r: cell.r, c: cell.c, tile: t, left: t.ice ?? 0 });
+      }
+    }
+    this.score += ice.length * ICE_POINTS * this.chain;
     const cleared: Cleared[] = [];
     for (const cell of this.clear.values()) {
       const t = board.get(cell.r, cell.c)!;
@@ -400,19 +530,28 @@ class StepBuilder {
     this.score += blastCleared * BLAST_POINTS * this.chain;
     // Sand washes away (one layer) under every fruit cleared or merged into a new special.
     const sand: Cell[] = [];
-    for (const cell of [...this.clear.values(), ...this.created.map((c) => ({ r: c.r, c: c.c }))]) {
+    for (const cell of [...this.clear.values(), ...this.created.map((c) => ({ r: c.r, c: c.c })), ...this.extraSand]) {
       if (board.sand[cell.r][cell.c] > 0) {
         board.sand[cell.r][cell.c]--;
         sand.push(cell);
       }
     }
     this.score += sand.length * SAND_POINTS;
+    // Grape puddles: fruit popped on a puddle scores a bonus; grapes leave new ones.
+    const puddlesUsed: Cell[] = [];
+    for (const cell of this.clear.values())
+      if (board.puddle[cell.r][cell.c]) {
+        board.puddle[cell.r][cell.c] = false;
+        puddlesUsed.push(cell);
+      }
+    this.score += puddlesUsed.length * PUDDLE_POINTS;
+    for (const c of this.newPuddles) board.puddle[c.r][c.c] = true;
     board.clear([...this.clear.values()]);
     for (const cr of this.created) {
       cr.tile.special = cr.special;
       if (cr.special === 'rainbow') cr.tile.kind = RAINBOW;
     }
-    return { type: 'clear', chain: this.chain, cleared, created: this.created, blasts: this.blasts, score: this.score, pops: this.pops, combo, sand };
+    return { type: 'clear', chain: this.chain, cleared, created: this.created, blasts: this.blasts, score: this.score, pops: this.pops, combo, sand, ice, traits: this.traits, grown: this.grown, puddlesAdded: this.newPuddles, puddlesUsed, sweet: this.sweet };
   }
 }
 
@@ -445,7 +584,7 @@ export function playTilt(board: Board, dir: Gravity, ctx: EngineCtx): MoveResult
 }
 
 function emptyResult(): MoveResult {
-  return { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0, flooded: false };
+  return { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0, flooded: false, iceCracked: 0, sweet: 0 };
 }
 
 /** Shared end of every move: first clear (if any), cascades, ripening, tide, shuffle. */
@@ -522,6 +661,8 @@ function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: 
     result.steps.push(step);
     result.score += step.score;
     result.sandCleared += step.sand.length;
+    result.iceCracked += step.ice.length;
+    result.sweet += step.sweet;
     if (board.tide > 0) {
       const waterTop = board.rows - board.tide;
       if (step.cleared.some((c) => c.r >= waterTop - 1)) tidePushed = true;

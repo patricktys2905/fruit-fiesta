@@ -9,7 +9,8 @@
     "preview": "vite preview --host",
     "test": "vitest run",
     "sim": "vite-node scripts/sim.ts",
-    "art": "node scripts/process-art.mjs"
+    "art": "node scripts/process-art.mjs",
+    "tune": "vite-node scripts/tune.ts"
   },
   "devDependencies": {
     "sharp": "^0.35.5",

@@ -31,8 +31,9 @@ export const QUEST_TEMPLATES: QuestTemplate[] = [
   { id: 'fruit', icon: '🧺', targets: [60, 90], args: 6, text: (n, k) => `Collect ${n} ${FRUIT_NAMES[k]} ${FRUIT_EMOJI[k]}`, amount: (r, k) => r.fruitByKind[k] },
   { id: 'customers', icon: '🥤', targets: [5, 8], text: (n) => `Serve ${n} café customers`, amount: (r) => r.customers },
   { id: 'golden', icon: '✨', targets: [10, 20], minLevel: 4, text: (n) => `Pop ${n} golden fruit`, amount: (r) => r.golden },
-  { id: 'sand', icon: '🏖️', targets: [20, 35], minLevel: 9, text: (n) => `Wash away ${n} sand`, amount: (r) => r.sand },
-  { id: 'coconuts', icon: '🥥', targets: [2, 4], minLevel: 11, text: (n) => `Collect ${n} coconuts`, amount: (r) => r.coconuts },
+  { id: 'ice', icon: '🧊', targets: [15, 25], minLevel: 41, text: (n) => 'Crack ' + n + ' ice', amount: (r) => r.ice ?? 0 },
+  { id: 'sand', icon: '🏖️', targets: [20, 35], minLevel: 11, text: (n) => `Wash away ${n} sand`, amount: (r) => r.sand },
+  { id: 'coconuts', icon: '🥥', targets: [2, 4], minLevel: 13, text: (n) => `Collect ${n} coconuts`, amount: (r) => r.coconuts },
 ];
 
 export interface Quest {

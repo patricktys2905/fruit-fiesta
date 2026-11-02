@@ -1,5 +1,5 @@
 import { Board, Cell, FallMove, GRAVITY_VEC, MUSH, Spawn, Special, Tile, cellKey } from './core/board';
-import { ClearStep, Cleared, CollectStep, RipenStep, COCONUT_POINTS } from './core/engine';
+import { ClearStep, Cleared, CollectStep, RipenStep, COCONUT_POINTS, TRAIT_NAMES } from './core/engine';
 import { FRUITS, makeBeeSprite, makeFruitSprite, makeSandSprite, makeMushSprite, tintSprite } from './fruitArt';
 import { Tweener, easeOutQuad, easeInBack, easeOutBack, fallEase, wait } from './tween';
 import { sfx } from './audio';
@@ -13,6 +13,7 @@ interface Vis {
   special?: Special;
   unripe?: number;
   golden?: boolean;
+  ice?: number;
 }
 
 type PType = 'drop' | 'seed' | 'spark' | 'bubble' | 'wedge' | 'leaf' | 'glint';
@@ -65,6 +66,8 @@ export class Renderer {
   private tideShown = 0;
   private tideNext = 0;
   private tideOn = false;
+  /** Grape juice puddles as shown. */
+  private puddle: boolean[][] = [];
   private vis = new Map<number, Vis>();
   readonly tweens = new Tweener();
   private particles: Particle[] = [];
@@ -93,6 +96,7 @@ export class Renderer {
     this.selected = null;
     this.hint = null;
     this.sand = board.sand.map((row) => [...row]);
+    this.puddle = board.puddle.map((row) => [...row]);
     this.tideOn = board.tideEvery > 0;
     this.tideShown = board.tide;
     this.tideNext = board.tideEvery - board.tideCounter;
@@ -102,7 +106,7 @@ export class Renderer {
       for (let c = 0; c < board.cols; c++) {
         const t = board.grid[r][c];
         if (!t) continue;
-        const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special, unripe: t.unripe, golden: t.golden };
+        const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special, unripe: t.unripe, golden: t.golden, ice: t.ice };
         this.vis.set(t.id, v);
         intro.push(this.tweens.to(v, { y: r }, 420 + r * 25, fallEase, (board.rows - r) * 30 + c * 12));
       }
@@ -493,6 +497,41 @@ export class Renderer {
         }),
       );
     }
+    // Ice cracks (the fruit stays put).
+    for (const ic of step.ice) {
+      anims.push(
+        wait(D(ic) + 40).then(() => {
+          const v = this.vis.get(ic.tile.id);
+          if (v) v.ice = ic.left || undefined;
+          const x = this.px(ic.c), y = this.py(ic.r);
+          this.emit('wedge', x, y, '#dff6ff', 6, { speed: 0.2, size: 6, life: 600 });
+          this.emit('glint', x, y, '#ffffff', 3, { speed: 0.1, size: 6, g: 0, life: 400, up: 0 });
+          this.fx.push({ kind: 'ring', t: 0, dur: 320, x, y, r: T * 0.6, color: '#c9f0ff', width: T * 0.08 });
+          sfx.select();
+        }),
+      );
+    }
+    // Grape puddles get used up, and new ones appear where grapes were matched.
+    for (const c of step.puddlesUsed) anims.push(wait(D(c)).then(() => { if (this.puddle[c.r]) this.puddle[c.r][c.c] = false; this.texts.push({ text: '+150', x: this.px(c.c), y: this.py(c.r) + T * 0.3, vy: -0.03, life: 0, max: 700, color: '#e3b8ff', size: T * 0.3, big: false }); }));
+    if (step.puddlesAdded.length) later(260, () => { for (const c of step.puddlesAdded) if (this.puddle[c.r]) this.puddle[c.r][c.c] = true; });
+    // Fruit Personalities: a little label where each one fires.
+    for (const tr of step.traits) {
+      const x = this.px(tr.at.c), y = this.py(tr.at.r);
+      later(120, () => {
+        this.texts.push({ text: TRAIT_NAMES[tr.kind], x, y: y - T * 0.55, vy: -0.035, life: 0, max: 900, color: colorOf(tr.kind), size: T * 0.34, big: false });
+        for (const c of tr.cells) this.sparkle(this.px(c.c), this.py(c.r), colorOf(tr.kind), 4);
+      });
+    }
+    for (const t of step.grown) {
+      later(200, () => {
+        const v = this.vis.get(t.id);
+        if (!v) return;
+        v.unripe = t.unripe;
+        v.golden = t.golden;
+        this.sparkle(this.px(v.x), this.py(v.y), '#7bd13b', 5);
+      });
+    }
+
     // Sand washes away as the fruit on it pops.
     for (const cell of step.sand) {
       const d = D(cell) + 60;
@@ -700,6 +739,22 @@ export class Renderer {
         ctx.restore();
       }
     }
+    // grape juice puddles
+    for (let r = 0; r < board.rows; r++)
+      for (let c = 0; c < board.cols; c++)
+        if (this.puddle[r]?.[c]) {
+          const x = this.px(c), y = this.py(r);
+          const wob = 1 + 0.04 * Math.sin(now / 300 + r + c);
+          ctx.fillStyle = 'rgba(150,70,230,0.32)';
+          ctx.beginPath();
+          ctx.ellipse(x, y + T * 0.12, T * 0.42 * wob, T * 0.3 * wob, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.35)';
+          ctx.beginPath();
+          ctx.ellipse(x - T * 0.15, y, T * 0.08, T * 0.04, -0.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
     // juice splats stain the board briefly
     for (const f of this.fx) if (f.kind === 'splat' && f.t > 0) this.drawSplat(f);
 
@@ -852,6 +907,37 @@ export class Renderer {
         ctx.lineTo(sx + Math.cos(aa) * rr, sy + Math.sin(aa) * rr);
       }
       ctx.fill();
+    }
+    if (v.ice) {
+      // ice cube over frozen fruit: thicker for two layers
+      const half = size * 0.5;
+      ctx.save();
+      ctx.fillStyle = v.ice >= 2 ? 'rgba(170,225,255,0.62)' : 'rgba(200,238,255,0.45)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = Math.max(2, size * 0.05);
+      roundRect(ctx, x - half, y - half, half * 2, half * 2, size * 0.18);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.moveTo(x - half * 0.8, y - half * 0.55);
+      ctx.lineTo(x - half * 0.45, y - half * 0.85);
+      ctx.lineTo(x - half * 0.3, y - half * 0.85);
+      ctx.lineTo(x - half * 0.8, y - half * 0.3);
+      ctx.fill();
+      if (v.ice === 1) {
+        // cracks after the first hit
+        ctx.strokeStyle = 'rgba(90,150,200,0.7)';
+        ctx.lineWidth = Math.max(1, size * 0.025);
+        ctx.beginPath();
+        ctx.moveTo(x + half * 0.1, y - half * 0.9);
+        ctx.lineTo(x - half * 0.05, y - half * 0.2);
+        ctx.lineTo(x + half * 0.35, y + half * 0.15);
+        ctx.moveTo(x - half * 0.05, y - half * 0.2);
+        ctx.lineTo(x - half * 0.5, y + half * 0.4);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     if (v.kind >= 0 && v.unripe) {
       // countdown badge

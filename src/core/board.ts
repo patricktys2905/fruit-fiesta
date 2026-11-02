@@ -16,6 +16,8 @@ export interface Tile {
   golden?: boolean;
   /** Moves a golden fruit has waited; it spoils into mush when too old. */
   age?: number;
+  /** Ice layers: frozen fruit can't be swapped; each clear cracks one layer instead of removing it. */
+  ice?: number;
 }
 
 export interface Cell {
@@ -67,7 +69,8 @@ export const GRAVITY_VEC: Record<Gravity, [number, number]> = { down: [1, 0], up
  *
  *  Optional layout strings (one per row) shape the board:
  *    '.' normal cell   ' ' or '#' hole (no cell; fruit falls straight past)
- *    's' sand          'S' deep sand (2 layers)     'o' starts with a coconut */
+ *    's' sand          'S' deep sand (2 layers)     'o' starts with a coconut
+ *    'i' frozen fruit  'I' double-frozen fruit */
 export class Board {
   grid: (Tile | null)[][];
   /** Playable cells (false = hole). */
@@ -92,6 +95,10 @@ export class Board {
   tideCounter = 0;
   /** Reaching this many rows floods the board (level lost). */
   tideMax = 99;
+  /** Fruit Personalities: each fruit has a small power when matched. */
+  personalities = false;
+  /** Grape juice puddles: the next fruit popped on a puddle scores a bonus. */
+  puddle: boolean[][];
   private nextId = 1;
   private layout: string[] | null;
 
@@ -108,6 +115,7 @@ export class Board {
       const ch = layout?.[r]?.[c] ?? '.';
       return ch !== ' ' && ch !== '#';
     }));
+    this.puddle = Array.from({ length: rows }, () => Array<boolean>(cols).fill(false));
     this.sand = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => {
       const ch = layout?.[r]?.[c];
       return ch === 's' ? 1 : ch === 'S' ? 2 : 0;
@@ -147,6 +155,10 @@ export class Board {
   /** Is this row under the tide? */
   underwater(r: number): boolean {
     return this.tide > 0 && r >= this.rows - this.tide;
+  }
+
+  iceLeft(): number {
+    return this.grid.flat().reduce((n, t) => n + (t?.ice ?? 0), 0);
   }
 
   sandLeft(): number {
@@ -215,7 +227,11 @@ export class Board {
           if (l1 && u1 && ul && l1.kind === u1.kind && u1.kind === ul.kind) banned.add(l1.kind);
           let kind = randInt(this.rng, this.kinds);
           for (let i = 0; i < this.kinds && banned.has(kind); i++) kind = (kind + 1) % this.kinds;
-          this.grid[r][c] = this.newTile(kind);
+          const t = this.newTile(kind);
+          const ch = this.layout?.[r]?.[c];
+          if (ch === 'i') t.ice = 1;
+          else if (ch === 'I') t.ice = 2;
+          this.grid[r][c] = t;
         }
       }
       if (this.findMatches().length === 0 && this.findHint()) return;
@@ -258,6 +274,7 @@ export class Board {
     const ta = this.grid[a.r][a.c], tb = this.grid[b.r][b.c];
     if (!ta || !tb) return false;
     if (this.underwater(a.r) || this.underwater(b.r)) return false; // fruit under the tide can't be moved
+    if (ta.ice || tb.ice) return false; // frozen fruit can't be moved
     if (ta.special === 'rainbow' || tb.special === 'rainbow') return true;
     if (ta.special && tb.special) return true;
     if (ta.kind === tb.kind) return false;
@@ -418,7 +435,7 @@ export class Board {
     for (let r = 0; r < this.rows; r++)
       for (let c = 0; c < this.cols; c++) {
         const t = this.grid[r][c];
-        if (t && t.kind !== COCONUT) cells.push({ r, c });
+        if (t && t.kind !== COCONUT && !t.ice) cells.push({ r, c });
       }
     const tiles = cells.map(({ r, c }) => this.grid[r][c]!);
     for (let attempt = 0; attempt < 500; attempt++) {

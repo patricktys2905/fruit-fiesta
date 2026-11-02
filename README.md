@@ -21,16 +21,19 @@ npm run build      # production build into dist/
 
 Swap two specials together for a Super Combo.
 
-## Worlds
-| World | Levels | New ideas |
+## Worlds (10 levels each)
+| World | Levels | Twist |
 |---|---|---|
-| 1. Sunny Isle | 1-8 | fruit goals, score goals, a heart-shaped board |
-| 2. Coconut Cove | 9-16 | **sand** (match on it to wash it away, deep sand takes 2) and **coconuts** (drop them to the bottom) |
-| 3. Berry Mountain | 17-24 | shaped boards with gaps, everything combined |
+| 1. Sunny Isle | 1-10 | Beach Café orders, ripening and golden fruit |
+| 2. Coconut Cove | 11-20 | sand, coconuts, rising tides |
+| 3. Berry Mountain | 21-30 | Island Tilt (change gravity), shaped boards |
+| 4. Citrus Grove | 31-40 | Fruit Personalities: lemons zing sand, kiwis ripen, grapes leave puddles, oranges pop a neighbour, strawberries calm customers, blueberries chill ice |
+| 5. Frosty Falls | 41-50 | frozen fruit (1-2 layers of ice) |
 
-Levels live in `src/core/levels.ts`. Layout strings: `.` cell, ` ` gap, `s` sand, `S` deep sand, `o` coconut.
-Tune with `npm run sim -- <fromId> <toId>`, which prints win rates and a suggested star curve.
-
+Levels live in `src/core/levels.ts`. Layout strings: `.` cell, ` ` gap, `s`/`S` sand, `o` coconut, `i`/`I` ice.
+`npm run tune -- <from> <to>` plays each level with bots, adjusts the moves to hit the world's target
+difficulty, sets the star curve, and writes `src/core/tuning.json` (which overrides the drafts).
+`npm run sim -- <from> <to>` just reports win rates.
 ## Publishing
 Pushing to `main` runs the GitHub Actions workflow: tests, build, then deploy to
 https://patricktys2905.github.io/fruit-fiesta/. It's an installable PWA and the whole game is cached for offline play.

@@ -72,6 +72,7 @@ export class Game {
     this.board = createBoard(level, seedOverride ?? level.seed);
     this.specs = goalSpecs(level);
     this.shownSand = this.board.sandLeft();
+    this.shownIce = this.board.iceLeft();
     this.busy = true;
     this.active = true;
     this.drag = null;
@@ -153,6 +154,7 @@ export class Game {
 
   /** Sand still showing on screen (the board itself may be ahead while animations replay). */
   private shownSand = 0;
+  private shownIce = 0;
 
   private goalsLeft(): number[] {
     return this.specs.map((g) => {
@@ -162,6 +164,7 @@ export class Game {
         case 'coconut': return g.count - this.coconuts;
         case 'golden': return g.count - this.golden;
         case 'orders': return this.cafe ? this.cafe.remaining : 0;
+        case 'ice': return this.shownIce;
       }
     });
   }
@@ -299,6 +302,13 @@ export class Game {
           }
         }
         this.shownSand -= step.sand.length;
+        this.shownIce -= step.ice.length;
+        if (step.ice.length) goalHit = true;
+        rep.ice += step.ice.length;
+        if (step.sweet && this.cafe) {
+          this.cafe.soothe(step.sweet);
+          this.cafeView.refresh();
+        }
         if (step.sand.length && hasSand(this.level)) goalHit = true;
         this.updateHud();
         if (goalHit) this.hud.bump();

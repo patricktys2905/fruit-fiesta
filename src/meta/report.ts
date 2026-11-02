@@ -18,12 +18,13 @@ export interface LevelReport {
   golden: number;
   customers: number;
   walkouts: number;
+  ice: number;
 }
 
 export const emptyReport = (levelId: number): LevelReport => ({
   levelId, won: false, stars: 0, score: 0, movesLeft: 0,
   jets: 0, bees: 0, bursts: 0, smoothies: 0, combos: 0, maxChain: 0,
-  fruit: 0, fruitByKind: [0, 0, 0, 0, 0, 0], sand: 0, coconuts: 0, golden: 0, customers: 0, walkouts: 0,
+  fruit: 0, fruitByKind: [0, 0, 0, 0, 0, 0], sand: 0, coconuts: 0, golden: 0, customers: 0, walkouts: 0, ice: 0,
 });
 
 export const specialsIn = (r: LevelReport) => r.jets + r.bees + r.bursts + r.smoothies;
