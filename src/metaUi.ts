@@ -9,6 +9,9 @@ import { LevelReport } from './meta/report';
 import { LEVELS, WORLDS } from './core/levels';
 import { Progress, isUnlocked } from './save';
 import { toast } from './pwa';
+import { STICKERS, StickerDef, AlbumState, freshAlbum, dropSticker, pageStickers, pageComplete, ownedCount, stickerArt, PAGE_REWARD, ALBUM_REWARD, DUPLICATE_COINS } from './meta/stickers';
+import { DailyPuzzleState, freshDailyPuzzle, recordDaily, dailyLevel } from './meta/dailyPuzzle';
+import { artUrl } from './art';
 import {
   BOOSTERS, BoosterId, Inventory, Reward, emptyInventory, rewardText, winCoins, LIFE_PRICE,
   SPIN_SLICES, spinResult, CALENDAR, CalendarState, freshCalendar, calendarReady, claimCalendar,
@@ -26,6 +29,15 @@ interface MetaSave {
   spinDate: string;
   calendar: CalendarState;
   weekly: WeeklyState | null;
+  album: AlbumState;
+  dailyPuzzle: DailyPuzzleState;
+}
+
+/** What a finished level earned (shown on the result screen). */
+export interface EndInfo {
+  coins: number;
+  stickers: { sticker: StickerDef; isNew: boolean }[];
+  dailyFirstWin: boolean;
 }
 
 const KEY = 'ff-meta-v1';
@@ -54,6 +66,8 @@ export class Meta {
       spinDate: loaded.spinDate ?? '',
       calendar: loaded.calendar ?? freshCalendar(),
       weekly: loaded.weekly ?? null,
+      album: loaded.album ?? freshAlbum(),
+      dailyPuzzle: loaded.dailyPuzzle ?? freshDailyPuzzle(),
     };
     this.rollDay();
     $('btn-daily').onclick = $('map-daily').onclick = () => this.openDaily();
@@ -123,19 +137,44 @@ export class Meta {
   // ---------- results ----------
 
   /** Count a finished attempt. Returns nothing; shows toasts for quests and achievements. */
-  onLevelEnd(r: LevelReport, prevStars = 0): number {
-    if (!r.won) this.loseLife();
+  onLevelEnd(r: LevelReport, prevStars = 0, dailyDate?: string): EndInfo {
+    const info: EndInfo = { coins: 0, stickers: [], dailyFirstWin: false };
+    if (dailyDate) {
+      // Daily Puzzle: free to play (no lives), first win of the day pays out.
+      info.dailyFirstWin = recordDaily(this.s.dailyPuzzle, dailyDate, r.score, r.stars, r.won);
+      if (info.dailyFirstWin) {
+        this.s.dailyPuzzle.rewarded = dailyDate;
+        this.s.coins += 100;
+        info.coins += 100;
+        info.stickers.push(this.giveSticker());
+      }
+    } else if (!r.won) this.loseLife();
+    else {
+      info.stickers.push(this.giveSticker());
+      if (r.stars === 3 && prevStars < 3) info.stickers.push(this.giveSticker());
+    }
+    for (const st of info.stickers) if (!st.isNew) { this.s.coins += DUPLICATE_COINS; info.coins += DUPLICATE_COINS; }
     addReport(this.s.life, r);
     const daily = this.rollDay();
     for (const q of applyReport(daily, r)) this.queueToast(`📅 Quest done: ${questText(q)}`);
     const week = this.rollWeek();
     for (const q of applyWeekly(week, r)) this.queueToast(`📆 Weekly quest done: ${questText(q)}`);
-    const coins = r.won ? winCoins(r.stars, prevStars) : 0;
+    const coins = r.won && !dailyDate ? winCoins(r.stars, prevStars) : 0;
     this.s.coins += coins;
+    info.coins += coins;
     this.checkAchievements();
     this.save();
     this.renderAll();
-    return coins;
+    return info;
+  }
+
+  private maxWorld(): number {
+    const max = this.maxLevel();
+    return WORLDS.find((w) => w.levels.some((l) => l.id === max))?.id ?? 1;
+  }
+
+  private giveSticker(): { sticker: StickerDef; isNew: boolean } {
+    return dropSticker(this.s.album, this.maxWorld(), Math.random);
   }
 
   // ---------- coins & boosters ----------
@@ -199,6 +238,9 @@ export class Meta {
       threeStarLevels: stars.filter((n) => n >= 3).length,
       worldsDone: WORLDS.filter((w) => w.levels.every((l) => (this.progress.stars[l.id] ?? 0) > 0)).length,
       streak: this.s.daily?.streak ?? 0,
+      stickers: ownedCount(this.s.album),
+      dailyStreak: this.s.dailyPuzzle.streak,
+      dailyWins: Object.values(this.s.dailyPuzzle.history).filter((h) => h.won).length,
     };
   }
 
@@ -328,7 +370,7 @@ export class Meta {
 
   // ---------- Fiesta Hub ----------
 
-  private claimables(): { calendar: boolean; spin: boolean; daily: number; weekly: number } {
+  private claimables(): { calendar: boolean; spin: boolean; daily: number; weekly: number; puzzle: boolean; album: boolean } {
     const today = dateKey(new Date());
     const d = this.rollDay();
     const w = this.rollWeek();
@@ -337,12 +379,14 @@ export class Meta {
       spin: this.s.spinDate !== today,
       daily: d.quests.filter((q) => questDone(q) && !q.claimed).length + (d.quests.every((q) => q.claimed) && !d.chestClaimed ? 1 : 0),
       weekly: w.quests.filter((q, i) => questDone(q) && !w.claimed[i]).length + (w.claimed.every(Boolean) && !w.chestClaimed ? 1 : 0),
+      puzzle: !this.s.dailyPuzzle.history[today]?.won,
+      album: this.albumClaimable(),
     };
   }
 
   private renderHub(): void {
     const c = this.claimables();
-    const n = (c.calendar ? 1 : 0) + (c.spin ? 1 : 0) + c.daily + c.weekly;
+    const n = (c.calendar ? 1 : 0) + (c.spin ? 1 : 0) + c.daily + c.weekly + (c.puzzle ? 1 : 0) + (c.album ? 1 : 0);
     for (const id of ['hub-badge', 'map-hub-badge']) {
       const b = document.getElementById(id);
       if (!b) continue;
@@ -375,6 +419,8 @@ export class Meta {
       { icon: '🎡', name: 'Daily Spin', note: c.spin ? 'Free spin ready!' : 'Come back tomorrow', ready: c.spin, open: () => this.openSpin() },
       { icon: '📅', name: 'Daily Quests', note: c.daily ? `${c.daily} reward${c.daily > 1 ? 's' : ''} to claim` : '3 new quests every day', ready: c.daily > 0, open: () => this.openDaily() },
       { icon: '📆', name: 'Fiesta Week', note: c.weekly ? `${c.weekly} reward${c.weekly > 1 ? 's' : ''} to claim` : '5 big quests this week', ready: c.weekly > 0, open: () => this.openWeekly() },
+      { icon: '🧩', name: 'Daily Puzzle', note: c.puzzle ? "Today's puzzle is waiting!" : `Solved today · 🔥 ${this.s.dailyPuzzle.streak}`, ready: c.puzzle, open: () => this.openDailyPuzzle() },
+      { icon: '📔', name: 'Sticker Album', note: c.album ? 'A page is complete: claim it!' : `${ownedCount(this.s.album)} of ${STICKERS.length} stickers`, ready: c.album, open: () => this.openAlbum() },
       { icon: '🛒', name: 'Shop', note: 'Boosters and lives for coins', ready: false, open: () => this.openShop() },
       { icon: '🏆', name: 'Awards', note: `${Object.keys(this.s.achievements).length} of ${ACHIEVEMENTS.length} earned`, ready: false, open: () => this.openAwards() },
     ];
@@ -520,5 +566,122 @@ export class Meta {
       this.openWeekly();
     });
     body.appendChild(chest);
+  }
+
+  // ---------- Sticker Album ----------
+
+  private albumClaimable(): boolean {
+    const a = this.s.album;
+    for (let w = 1; w <= 10; w++) if (pageComplete(a, w) && !a.pagesClaimed.includes(w)) return true;
+    return ownedCount(a) === STICKERS.length && !a.albumClaimed;
+  }
+
+  openAlbum(page = 0): void {
+    sfx.select();
+    const a = this.s.album;
+    const world = page || Math.min(10, Math.max(1, this.maxWorld()));
+    const body = this.panel('📔 Sticker Album', `<b>${ownedCount(a)}</b> of ${STICKERS.length} collected · win levels to find more`);
+    const tabs = document.createElement('div');
+    tabs.className = 'album-tabs';
+    for (let w = 1; w <= 10; w++) {
+      const t = document.createElement('button');
+      const got = pageStickers(w).filter((st) => a.owned[st.id]).length;
+      t.className = 'album-tab' + (w === world ? ' on' : '') + (got === 6 ? ' full' : '');
+      t.textContent = String(w);
+      t.title = `${WORLDS[w - 1].name}: ${got}/6`;
+      t.onclick = () => this.openAlbum(w);
+      tabs.appendChild(t);
+    }
+    body.appendChild(tabs);
+    const title = document.createElement('p');
+    title.className = 'album-page-title';
+    title.textContent = `${WORLDS[world - 1].name} · ${pageStickers(world).filter((st) => a.owned[st.id]).length}/6`;
+    body.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'album-grid';
+    pageStickers(world).forEach((st, i) => {
+      const n = a.owned[st.id] ?? 0;
+      const art = artUrl(stickerArt(st));
+      const d = document.createElement('div');
+      d.className = 'sticker' + (n ? ' got' : '');
+      d.style.setProperty('--tilt', `${((i * 37) % 11) - 5}deg`);
+      d.innerHTML = n
+        ? `${art ? `<img alt="" src="${art}">` : '<span class="sticker-ph">⭐</span>'}<b>${st.name}</b>${n > 1 ? `<small>×${n}</small>` : ''}`
+        : `<span class="sticker-ph">?</span><b>???</b>`;
+      grid.appendChild(d);
+    });
+    body.appendChild(grid);
+    if (pageComplete(a, world)) {
+      const claimed = a.pagesClaimed.includes(world);
+      const btn = document.createElement('button');
+      btn.className = 'big-btn spin-btn';
+      btn.textContent = claimed ? 'Page complete ✓' : `Claim page reward: ${rewardText(PAGE_REWARD)}`;
+      btn.disabled = claimed;
+      btn.onclick = () => {
+        a.pagesClaimed.push(world);
+        this.grant(PAGE_REWARD, `📔 ${WORLDS[world - 1].name} page complete`);
+        sfx.win();
+        this.openAlbum(world);
+      };
+      body.appendChild(btn);
+    }
+    if (ownedCount(a) === STICKERS.length && !a.albumClaimed) {
+      const btn = document.createElement('button');
+      btn.className = 'big-btn spin-btn';
+      btn.textContent = `🏆 Album complete! ${rewardText(ALBUM_REWARD)}`;
+      btn.onclick = () => {
+        a.albumClaimed = true;
+        this.grant(ALBUM_REWARD, '📔 Whole album complete');
+        this.openAlbum(world);
+      };
+      body.appendChild(btn);
+    }
+  }
+
+  // ---------- Daily Puzzle ----------
+
+  /** Start a level (set by main.ts). */
+  onPlayDaily?: (level: ReturnType<typeof dailyLevel>) => void;
+
+  openDailyPuzzle(): void {
+    sfx.select();
+    const today = dateKey(new Date());
+    const lvl = dailyLevel(today);
+    const dp = this.s.dailyPuzzle;
+    const h = dp.history[today];
+    const body = this.panel('🧩 Daily Puzzle', `A new puzzle every day · the same board for everyone · free to play`);
+    const card = document.createElement('div');
+    card.className = 'daily-card';
+    card.innerHTML = `
+      <p class="daily-name">${lvl.name}</p>
+      <div class="daily-stats">
+        <span><small>Best today</small><b>${h ? h.best.toLocaleString() : '–'}</b></span>
+        <span><small>Stars</small><b>${h ? '★'.repeat(h.stars) + '☆'.repeat(3 - h.stars) : '☆☆☆'}</b></span>
+        <span><small>Streak</small><b>🔥 ${dp.streak}</b></span>
+      </div>
+      <p class="daily-reward">${h?.won ? '✅ Solved! Play again to beat your best.' : 'First win today: 🪙 100 + a sticker'}</p>`;
+    body.appendChild(card);
+    // the last 7 days
+    const week = document.createElement('div');
+    week.className = 'daily-week';
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const k = dateKey(d);
+      const r = dp.history[k];
+      const el = document.createElement('span');
+      el.className = 'daily-dot' + (r?.won ? ' won' : r ? ' tried' : '') + (i === 0 ? ' today' : '');
+      el.innerHTML = `<small>${['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.getDay()]}</small>${r?.won ? '★' : r ? '·' : ''}`;
+      week.appendChild(el);
+    }
+    body.appendChild(week);
+    const btn = document.createElement('button');
+    btn.className = 'big-btn spin-btn';
+    btn.textContent = h ? 'Play again' : 'Play!';
+    btn.onclick = () => {
+      $('panel').classList.add('hidden');
+      this.onPlayDaily?.(lvl);
+    };
+    body.appendChild(btn);
   }
 }

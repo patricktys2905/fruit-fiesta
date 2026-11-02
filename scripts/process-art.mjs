@@ -13,7 +13,7 @@ import path from 'node:path';
 
 const RAW = path.resolve('art-src/raw');
 const OUT = path.resolve('src/art');
-const SPRITE = /^(fruit-[0-5]|smoothie|bee|coconut|pinata|lava|logo|customer-[a-z]+)$/;
+const SPRITE = /^(fruit-[0-5]|smoothie|bee|coconut|pinata|lava|logo|customer-[a-z]+|sticker-\d+-\d+)$/;
 const BACKGROUND = /^bg-(game|title|map(-\d+)?)$/;
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -70,6 +70,41 @@ function removeBackground(data, w, h) {
   return cleared / (w * h);
 }
 
+/** Stickers: draw a white die-cut border around the shape (the original white border is lost with the background). */
+async function addWhiteBorder(buf, px) {
+  const pad = px + 2;
+  const { data, info } = await sharp(buf)
+    .extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const w = info.width, h = info.height;
+  // solid mask of the shape, then grow it by px pixels (separable max filter)
+  let m = new Uint8Array(w * h);
+  for (let p = 0; p < w * h; p++) m[p] = data[p * 4 + 3] > 40 ? 1 : 0;
+  const grow = (src, horizontal) => {
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        let on = 0;
+        for (let d = -px; d <= px && !on; d++) {
+          const xx = horizontal ? x + d : x, yy = horizontal ? y : y + d;
+          if (xx >= 0 && yy >= 0 && xx < w && yy < h && src[yy * w + xx]) on = 1;
+        }
+        out[y * w + x] = on;
+      }
+    return out;
+  };
+  m = grow(grow(m, true), false);
+  // white where the grown mask is, the original art on top
+  for (let p = 0; p < w * h; p++) {
+    const a = data[p * 4 + 3] / 255;
+    if (!m[p]) continue;
+    data[p * 4] = Math.round(data[p * 4] * a + 255 * (1 - a));
+    data[p * 4 + 1] = Math.round(data[p * 4 + 1] * a + 255 * (1 - a));
+    data[p * 4 + 2] = Math.round(data[p * 4 + 2] * a + 255 * (1 - a));
+    data[p * 4 + 3] = 255;
+  }
+  return sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+}
 function bbox(data, w, h) {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++)
@@ -117,7 +152,9 @@ for (const file of files) {
       })
       .png()
       .toBuffer();
-    img = sharp(padded).resize(384, 384, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } });
+    const size = name.startsWith('sticker-') ? 192 : 384;
+    const finalBuf = name.startsWith('sticker-') ? await addWhiteBorder(padded, Math.round(side * 0.035)) : padded;
+    img = sharp(finalBuf).resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } });
   }
   for (const ext of ['png', 'webp']) fs.rmSync(path.join(OUT, `${name}.${ext}`), { force: true });
   await img.webp({ quality: 88, alphaQuality: 100, effort: 6 }).toFile(path.join(OUT, `${name}.webp`));

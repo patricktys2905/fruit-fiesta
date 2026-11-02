@@ -29,7 +29,7 @@ export class Hud {
 
   setLevel(level: LevelDef, specs: GoalSpec[]): void {
     this.level = level;
-    this.levelName.textContent = `Level ${level.id} · ${level.name}`;
+    this.levelName.textContent = level.daily ? `🧩 ${level.name}` : `Level ${level.id} · ${level.name}`;
     this.shownScore = this.targetScore = 0;
     this.score.textContent = '0';
     const max = level.stars[2];

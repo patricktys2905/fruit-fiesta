@@ -55,6 +55,9 @@ export interface AchieveCtx {
   threeStarLevels: number;
   worldsDone: number;
   streak: number;
+  stickers: number;
+  dailyStreak: number;
+  dailyWins: number;
 }
 
 export interface Achievement {
@@ -77,6 +80,10 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'lava', icon: '🌋', name: 'Lava Tamer', desc: 'Cool 60 lava', target: 60, value: (c) => c.life.lava },
   { id: 'world-7', icon: '🦉', name: 'Night Owl', desc: 'Finish Firefly Night', target: 7, value: (c) => c.worldsDone },
   { id: 'world-10', icon: '👑', name: 'Fiesta Legend', desc: 'Finish all 10 worlds (level 100!)', target: 10, value: (c) => c.worldsDone },
+  { id: 'stickers-30', icon: '📔', name: 'Sticker Fan', desc: 'Collect 30 different stickers', target: 30, value: (c) => c.stickers ?? 0 },
+  { id: 'stickers-60', icon: '🌈', name: 'Complete Collection', desc: 'Collect all 60 stickers', target: 60, value: (c) => c.stickers ?? 0 },
+  { id: 'puzzle-7', icon: '🧩', name: 'Puzzle Pro', desc: 'Solve 7 Daily Puzzles', target: 7, value: (c) => c.dailyWins ?? 0 },
+  { id: 'puzzle-streak', icon: '🔥', name: 'Puzzle Streak', desc: 'Solve the Daily Puzzle 5 days in a row', target: 5, value: (c) => c.dailyStreak ?? 0 },
   { id: 'jets', icon: '🧃', name: 'Juice Master', desc: 'Make 50 Juice Jets', target: 50, value: (c) => c.life.jets },
   { id: 'bees', icon: '🐝', name: 'Bee Keeper', desc: 'Make 30 Busy Bees', target: 30, value: (c) => c.life.bees },
   { id: 'bursts', icon: '💥', name: 'Kaboom!', desc: 'Make 30 Fruit Bursts', target: 30, value: (c) => c.life.bursts },

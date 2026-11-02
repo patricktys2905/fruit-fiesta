@@ -71,7 +71,7 @@ describe('achievements', () => {
   it('unlock from lifetime stats and level progress', () => {
     const life = freshLifetime();
     addReport(life, { ...emptyReport(1), won: true, movesLeft: 0, bees: 30, maxChain: 6, score: 31000 });
-    const ctx = { life, totalStars: 3, threeStarLevels: 1, worldsDone: 0, streak: 0 };
+    const ctx = { life, totalStars: 3, threeStarLevels: 1, worldsDone: 0, streak: 0, stickers: 0, dailyStreak: 0, dailyWins: 0 };
     const ids = newlyEarned(ctx, {}).map((a) => a.id);
     expect(ids).toEqual(expect.arrayContaining(['first-win', 'bees', 'chain', 'score', 'clutch']));
     expect(ids).not.toContain('world-1');

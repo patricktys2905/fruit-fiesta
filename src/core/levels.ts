@@ -43,6 +43,8 @@ export interface LevelDef {
   night?: boolean;
   /** Rows that slide sideways after every move. */
   conveyors?: Conveyor[];
+  /** Set on Daily Puzzle levels (the date they belong to). */
+  daily?: string;
 }
 
 export interface WorldDef {

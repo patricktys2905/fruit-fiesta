@@ -276,7 +276,7 @@ $('lc-play').onclick = () => {
 // ---------- game ----------
 function startLevel(level: LevelDef, beeStart = false) {
   sfx.unlock();
-  if (!meta.canStart()) {
+  if (!level.daily && !meta.canStart()) {
     toast('💔 Out of lives! Check Daily Quests for more');
     if (document.body.dataset.screen !== 'levels') openLevels();
     return;
@@ -314,9 +314,10 @@ soundBtn.onclick = () => {
 
 // ---------- results ----------
 function onLevelEnd(r: LevelResult) {
-  const prevStars = progress.stars[r.level.id] ?? 0;
-  const prevBest = progress.best[r.level.id] ?? 0;
-  if (r.won) {
+  const daily = r.level.daily;
+  const prevStars = daily ? 0 : progress.stars[r.level.id] ?? 0;
+  const prevBest = daily ? 0 : progress.best[r.level.id] ?? 0;
+  if (r.won && !daily) {
     progress.stars[r.level.id] = Math.max(prevStars, r.stars);
     progress.best[r.level.id] = Math.max(progress.best[r.level.id] ?? 0, r.score);
     saveProgress(progress);
@@ -339,12 +340,24 @@ function onLevelEnd(r: LevelResult) {
   $('modal-note').textContent = r.won
     ? r.score > prevBest ? 'New best score!' : `Best: ${prevBest.toLocaleString()}`
     : 'So close! You lost a life 💔';
-  const coins = meta.onLevelEnd(r.report, prevStars);
-  if (coins) $('modal-note').textContent += `  ·  🪙 +${coins}`;
-  const next = LEVELS.find((l) => l.id === r.level.id + 1);
+  const info = meta.onLevelEnd(r.report, prevStars, daily);
+  if (daily) $('modal-note').textContent = r.won ? (info.dailyFirstWin ? 'Daily Puzzle solved! 🧩' : 'Solved again. Nice!') : 'Free to try again any time 🧩';
+  if (info.coins) $('modal-note').textContent += `  ·  🪙 +${info.coins}`;
+  // Sticker reveal
+  const st = $('modal-sticker');
+  st.innerHTML = info.stickers
+    .map((x, i) => {
+      const art = artUrl(`sticker-${x.sticker.id}`);
+      return `<div class="reveal" style="animation-delay:${0.9 + i * 0.35}s">${art ? `<img alt="" src="${art}">` : '<span>⭐</span>'}<small>${x.isNew ? 'New sticker!' : 'Duplicate +🪙20'}</small><b>${x.sticker.name}</b></div>`;
+    })
+    .join('');
+  st.classList.toggle('hidden', !info.stickers.length);
+  const next = daily ? undefined : LEVELS.find((l) => l.id === r.level.id + 1);
   $('btn-modal-next').classList.toggle('hidden', !r.won || !next);
   $('modal').classList.remove('hidden');
 }
+
+meta.onPlayDaily = (lvl) => startLevel(lvl);
 
 $('btn-modal-retry').onclick = () => startLevel(current);
 $('btn-modal-levels').onclick = () => openLevels();
