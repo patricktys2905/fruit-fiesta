@@ -31,7 +31,10 @@ export interface MatchGroup {
 export interface FallMove {
   tile: Tile;
   fromR: number;
+  fromC: number;
   toR: number;
+  toC: number;
+  /** Same as toC (kept for convenience). */
   c: number;
 }
 
@@ -39,7 +42,10 @@ export interface Spawn {
   tile: Tile;
   r: number;
   c: number;
-  /** Virtual (negative) row the tile starts falling from, above the board. */
+  /** Virtual position just off the board edge the tile slides in from. */
+  fromR: number;
+  fromC: number;
+  /** Same as fromR (kept for convenience). */
   dropFrom: number;
   /** Ripening countdown at the moment it spawned. */
   unripe?: number;
@@ -52,6 +58,10 @@ export const COCONUT = -2;
 
 /** Spoiled fruit: can't be matched; cleared by a match next to it or by a blast. */
 export const MUSH = -3;
+
+/** Which way fruit falls (Island Tilt changes this). */
+export type Gravity = 'down' | 'up' | 'left' | 'right';
+export const GRAVITY_VEC: Record<Gravity, [number, number]> = { down: [1, 0], up: [-1, 0], left: [0, -1], right: [0, 1] };
 
 /** Pure game-board logic: no rendering, fully deterministic for a given RNG.
  *
@@ -72,6 +82,16 @@ export class Board {
   unripeChance = 0;
   /** Moves for unripe fruit to ripen. */
   ripenTurns = 3;
+  /** Which way fruit falls. */
+  gravity: Gravity = 'down';
+  /** Rows covered by the tide, counted up from the bottom (0 = no water). */
+  tide = 0;
+  /** The tide rises one row every this many moves (0 = tide off). */
+  tideEvery = 0;
+  /** Moves since the tide last rose. */
+  tideCounter = 0;
+  /** Reaching this many rows floods the board (level lost). */
+  tideMax = 99;
   private nextId = 1;
   private layout: string[] | null;
 
@@ -104,11 +124,29 @@ export class Board {
     return cell.r >= 0 && cell.c >= 0 && cell.r < this.rows && cell.c < this.cols && this.mask[cell.r][cell.c];
   }
 
-  /** Playable rows of a column, top to bottom. */
-  private columnRows(c: number): number[] {
-    const out: number[] = [];
-    for (let r = 0; r < this.rows; r++) if (this.mask[r][c]) out.push(r);
-    return out;
+  /** Lanes of playable cells in the direction of gravity, each ordered from the
+   *  side new fruit enters to the side it falls toward. */
+  lanes(): Cell[][] {
+    const out: Cell[][] = [];
+    if (this.gravity === 'down' || this.gravity === 'up') {
+      for (let c = 0; c < this.cols; c++) {
+        const lane: Cell[] = [];
+        for (let r = 0; r < this.rows; r++) if (this.mask[r][c]) lane.push({ r, c });
+        out.push(this.gravity === 'up' ? lane.reverse() : lane);
+      }
+    } else {
+      for (let r = 0; r < this.rows; r++) {
+        const lane: Cell[] = [];
+        for (let c = 0; c < this.cols; c++) if (this.mask[r][c]) lane.push({ r, c });
+        out.push(this.gravity === 'left' ? lane.reverse() : lane);
+      }
+    }
+    return out.filter((l) => l.length);
+  }
+
+  /** Is this row under the tide? */
+  underwater(r: number): boolean {
+    return this.tide > 0 && r >= this.rows - this.tide;
   }
 
   sandLeft(): number {
@@ -119,13 +157,12 @@ export class Board {
     return this.grid.flat().filter((t) => t?.kind === COCONUT).length;
   }
 
-  /** Coconuts sitting in the bottom cell of their column are collected (removed). */
+  /** Coconuts that reached the far ("downhill") end of their lane are collected (removed). */
   collectCoconuts(): { tile: Tile; r: number; c: number }[] {
     const out: { tile: Tile; r: number; c: number }[] = [];
-    for (let c = 0; c < this.cols; c++) {
-      const rows = this.columnRows(c);
-      const r = rows[rows.length - 1];
-      const t = r === undefined ? null : this.grid[r][c];
+    for (const lane of this.lanes()) {
+      const { r, c } = lane[lane.length - 1];
+      const t = this.grid[r][c];
       if (t && t.kind === COCONUT) {
         out.push({ tile: t, r, c });
         this.grid[r][c] = null;
@@ -220,6 +257,7 @@ export class Board {
     if (!this.inBounds(a) || !this.inBounds(b) || !this.isAdjacent(a, b)) return false;
     const ta = this.grid[a.r][a.c], tb = this.grid[b.r][b.c];
     if (!ta || !tb) return false;
+    if (this.underwater(a.r) || this.underwater(b.r)) return false; // fruit under the tide can't be moved
     if (ta.special === 'rainbow' || tb.special === 'rainbow') return true;
     if (ta.special && tb.special) return true;
     if (ta.kind === tb.kind) return false;
@@ -300,21 +338,20 @@ export class Board {
     return removed;
   }
 
-  /** Drop tiles down into empty spaces (falling straight past holes). */
+  /** Slide tiles toward gravity into empty spaces (passing straight over holes). */
   collapse(): FallMove[] {
     const moves: FallMove[] = [];
-    for (let c = 0; c < this.cols; c++) {
-      const rows = this.columnRows(c);
-      let w = rows.length - 1;
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const r = rows[i];
-        const t = this.grid[r][c];
+    for (const lane of this.lanes()) {
+      let w = lane.length - 1;
+      for (let i = lane.length - 1; i >= 0; i--) {
+        const from = lane[i];
+        const t = this.grid[from.r][from.c];
         if (!t) continue;
-        const target = rows[w];
-        if (r !== target) {
-          this.grid[target][c] = t;
-          this.grid[r][c] = null;
-          moves.push({ tile: t, fromR: r, toR: target, c });
+        const to = lane[w];
+        if (from.r !== to.r || from.c !== to.c) {
+          this.grid[to.r][to.c] = t;
+          this.grid[from.r][from.c] = null;
+          moves.push({ tile: t, fromR: from.r, fromC: from.c, toR: to.r, toC: to.c, c: to.c });
         }
         w--;
       }
@@ -322,16 +359,16 @@ export class Board {
     return moves;
   }
 
-  /** Fill empty cells (at the top after collapse) with new fruit, and the odd coconut. */
+  /** Fill empty cells (at the entry side after collapse) with new fruit, and the odd coconut. */
   refill(): Spawn[] {
     const spawns: Spawn[] = [];
+    const [dr, dc] = GRAVITY_VEC[this.gravity];
     let coconutRoom = this.coconutsToSpawn > 0 ? Math.max(0, this.maxCoconuts - this.coconutsOnBoard()) : 0;
-    for (let c = 0; c < this.cols; c++) {
-      const rows = this.columnRows(c);
+    for (const lane of this.lanes()) {
       let empty = 0;
-      while (empty < rows.length && !this.grid[rows[empty]][c]) empty++;
+      while (empty < lane.length && !this.grid[lane[empty].r][lane[empty].c]) empty++;
       for (let i = 0; i < empty; i++) {
-        const r = rows[i];
+        const { r, c } = lane[i];
         let kind = randInt(this.rng, this.kinds);
         if (coconutRoom > 0 && this.coconutsToSpawn > 0 && i === 0 && this.rng() < 0.3) {
           kind = COCONUT;
@@ -340,7 +377,9 @@ export class Board {
         }
         const t = this.maybeUnripe(this.newTile(kind));
         this.grid[r][c] = t;
-        spawns.push({ tile: t, r, c, dropFrom: (rows[0] ?? 0) - (empty - i), unripe: t.unripe });
+        const back = empty - i;
+        const fromR = lane[0].r - dr * back, fromC = lane[0].c - dc * back;
+        spawns.push({ tile: t, r, c, fromR, fromC, dropFrom: fromR, unripe: t.unripe });
       }
     }
     return spawns;

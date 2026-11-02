@@ -1,7 +1,7 @@
 /** Resolves a whole player move (swap → matches → specials → cascades) into a list of
  *  steps. Pure and deterministic: the renderer just replays the steps, and the
  *  simulator uses exactly the same rules. */
-import { Board, COCONUT, MUSH, Cell, FallMove, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
+import { Board, COCONUT, MUSH, Cell, FallMove, Gravity, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
 import { groupScore } from './scoring';
 import { randInt } from './rng';
 
@@ -79,7 +79,26 @@ export interface RipenStep {
   spoiled: Tile[];
 }
 
-export type Step = ClearStep | FallStep | ShuffleStep | CollectStep | RipenStep;
+/** Island Tilt: gravity now pulls this way. */
+export interface TiltStep {
+  type: 'tilt';
+  gravity: Gravity;
+}
+
+/** End of move tide report. */
+export interface TideStep {
+  type: 'tide';
+  /** Rows now underwater. */
+  tide: number;
+  /** A match at the waterline pushed it back this move. */
+  pushed: boolean;
+  /** Net change this move (-1, 0 or +1). */
+  change: number;
+  /** Moves until it rises again. */
+  nextRise: number;
+}
+
+export type Step = ClearStep | FallStep | ShuffleStep | CollectStep | RipenStep | TiltStep | TideStep;
 
 /** Golden fruit spoils after this many moves. */
 export const SPOIL_MOVES = 6;
@@ -93,6 +112,8 @@ export interface MoveResult {
   collected: number[];
   sandCleared: number;
   coconuts: number;
+  /** The tide reached the flood line (level lost). */
+  flooded: boolean;
 }
 
 export interface EngineCtx {
@@ -398,21 +419,44 @@ class StepBuilder {
 // ---------- full move ----------
 
 export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveResult {
-  const result: MoveResult = { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0 };
+  const result = emptyResult();
   if (!board.isValidSwap(a, b)) return result;
   result.valid = true;
-
   board.swap(a, b);
   const movedTile = board.get(b.r, b.c)!; // the fruit the player dragged, now at b
   const otherTile = board.get(a.r, a.c)!;
+  return resolve(board, ctx, result, (sb) => {
+    const combo = sb.swapCombo(b, movedTile, a, otherTile);
+    const groups = board.findMatches().filter((g) => g.cells.some((c) => !sb.clear.has(cellKey(c.r, c.c))));
+    sb.planGroups(groups, [b, a]);
+    sb.run();
+    return combo;
+  });
+}
 
+/** Island Tilt: change which way gravity pulls; everything slides, then settles. Costs a move. */
+export function playTilt(board: Board, dir: Gravity, ctx: EngineCtx): MoveResult {
+  const result = emptyResult();
+  if (board.gravity === dir) return result;
+  result.valid = true;
+  board.gravity = dir;
+  result.steps.push({ type: 'tilt', gravity: dir });
+  return resolve(board, ctx, result, null);
+}
+
+function emptyResult(): MoveResult {
+  return { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0, flooded: false };
+}
+
+/** Shared end of every move: first clear (if any), cascades, ripening, tide, shuffle. */
+function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: StepBuilder) => boolean) | null): MoveResult {
   let chain = 1;
-  let sb = new StepBuilder(board, ctx, chain);
-  const combo = sb.swapCombo(b, movedTile, a, otherTile);
-  let groups = board.findMatches().filter((g) => g.cells.some((c) => !sb.clear.has(cellKey(c.r, c.c))));
-  sb.planGroups(groups, [b, a]);
-  sb.run();
-  push(sb.finalize(board, result.collected, combo));
+  let tidePushed = false;
+  if (first) {
+    const sb = new StepBuilder(board, ctx, chain);
+    const combo = first(sb);
+    push(sb.finalize(board, result.collected, combo));
+  } else chain = 0;
 
   cascade();
   // End of move: fruit ripens (which can set off more matches), old golden fruit spoils.
@@ -423,6 +467,23 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
       chain = 0;
       cascade(true);
     }
+  }
+
+  // The tide: matches at the waterline push it back; it rises every few moves.
+  if (board.tideEvery > 0) {
+    let change = 0;
+    if (tidePushed && board.tide > 0) {
+      board.tide--;
+      change--;
+    }
+    board.tideCounter++;
+    if (board.tideCounter >= board.tideEvery) {
+      board.tideCounter = 0;
+      board.tide++;
+      change++;
+    }
+    result.steps.push({ type: 'tide', tide: board.tide, pushed: tidePushed, change, nextRise: board.tideEvery - board.tideCounter });
+    if (board.tide >= board.tideMax) result.flooded = true;
   }
 
   if (!board.findHint()) {
@@ -438,7 +499,7 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
         const falls = board.collapse();
         const spawns = board.refill();
         result.steps.push({ type: 'fall', falls, spawns });
-        // Coconuts that reached the bottom are collected; the gap refills.
+        // Coconuts that reached the far end are collected; the gap refills.
         for (let g2 = 0; g2 < 20; g2++) {
           const items = board.collectCoconuts();
           if (!items.length) break;
@@ -448,10 +509,10 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
           result.steps.push({ type: 'fall', falls: board.collapse(), spawns: board.refill() });
         }
       }
-      groups = board.findMatches();
+      const groups = board.findMatches();
       if (!groups.length) break;
       chain++;
-      sb = new StepBuilder(board, ctx, chain);
+      const sb = new StepBuilder(board, ctx, chain);
       sb.planGroups(groups, []);
       sb.run();
       push(sb.finalize(board, result.collected, false));
@@ -461,9 +522,12 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
     result.steps.push(step);
     result.score += step.score;
     result.sandCleared += step.sand.length;
+    if (board.tide > 0) {
+      const waterTop = board.rows - board.tide;
+      if (step.cleared.some((c) => c.r >= waterTop - 1)) tidePushed = true;
+    }
   }
 }
-
 /** Advance ripening by one move. Returns null when nothing on the board is ripening. */
 export function ripenBoard(board: Board): RipenStep | null {
   const step: RipenStep = { type: 'ripen', ticked: [], ripened: [], spoiled: [] };

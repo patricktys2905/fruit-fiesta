@@ -1,5 +1,5 @@
-import { Board, Cell } from './core/board';
-import { playMove, Step, COCONUT_POINTS } from './core/engine';
+import { Board, Cell, Gravity } from './core/board';
+import { playMove, playTilt, MoveResult, Step, COCONUT_POINTS } from './core/engine';
 import { LevelDef, createBoard, hasSand } from './core/levels';
 import { starsFor, LEFTOVER_MOVE_BONUS } from './core/scoring';
 import { Renderer } from './renderer';
@@ -17,6 +17,8 @@ export interface LevelResult {
   score: number;
   stars: number;
   report: LevelReport;
+  /** Why the level was lost early, if it was. */
+  reason?: 'flooded';
 }
 
 const CHEERS = ['', '', 'Juicy!', 'Tasty!', 'Fruitastic!', 'Smoothie Storm!', 'FIESTA!!'];
@@ -75,6 +77,7 @@ export class Game {
     this.drag = null;
     this.hud.setLevel(level, this.specs);
     this.updateHud();
+    this.onTiltChange?.(this.board.gravity);
     await this.renderer.setBoard(this.board);
     if (session !== this.session) return;
     this.busy = false;
@@ -187,7 +190,7 @@ export class Game {
     await Promise.all([this.renderer.moveTile(ta, b.r, b.c), this.renderer.moveTile(tb, a.r, a.c)]);
     if (session !== this.session) return;
 
-    const result = playMove(this.board, a, b, { wantedKinds: () => this.wantedKinds(), wantSand: () => hasSand(this.level) && this.board.sandLeft() > 0 });
+    const result = playMove(this.board, a, b, this.engineCtx());
     if (!result.valid) {
       sfx.invalid();
       await Promise.all([this.renderer.moveTile(ta, a.r, a.c, 170), this.renderer.moveTile(tb, b.r, b.c, 170)]);
@@ -198,11 +201,40 @@ export class Game {
       return;
     }
 
+    await this.afterMove(result, session);
+  }
+
+  /** Island Tilt: change gravity (costs a move). */
+  async tilt(dir: Gravity): Promise<void> {
+    if (this.busy || !this.active || !this.level.tilt) return;
+    const session = this.session;
+    const result = playTilt(this.board, dir, this.engineCtx());
+    if (!result.valid) return;
+    this.busy = true;
+    this.renderer.hint = null;
+    this.renderer.selected = null;
+    this.onTiltChange?.(dir);
+    await this.afterMove(result, session);
+  }
+
+  /** Fired when gravity changes (for the tilt buttons). */
+  onTiltChange?: (g: Gravity) => void;
+
+  get gravity(): Gravity {
+    return this.board?.gravity ?? 'down';
+  }
+
+  private engineCtx() {
+    return { wantedKinds: () => this.wantedKinds(), wantSand: () => hasSand(this.level) && this.board.sandLeft() > 0 };
+  }
+
+  private async afterMove(result: MoveResult, session: number): Promise<void> {
     this.moves--;
     this.movesMade++;
     this.updateHud();
     await this.replay(result.steps, session);
     if (session !== this.session) return;
+    if (result.flooded) return this.finish(false, session, 'flooded');
     // A move has passed at the café: customers get less patient.
     if (this.cafe) {
       const t = this.cafe.tick();
@@ -273,6 +305,10 @@ export class Game {
         await this.renderer.playClear(step);
       } else if (step.type === 'fall') {
         await this.renderer.dropTiles(step.falls, step.spawns);
+      } else if (step.type === 'tilt') {
+        await this.renderer.playTilt(step.gravity);
+      } else if (step.type === 'tide') {
+        await this.renderer.playTide(step);
       } else if (step.type === 'ripen') {
         await this.renderer.playRipen(step);
       } else if (step.type === 'collect') {
@@ -324,7 +360,7 @@ export class Game {
     return this.active;
   }
 
-  private async finish(won: boolean, session: number): Promise<void> {
+  private async finish(won: boolean, session: number, reason?: 'flooded'): Promise<void> {
     this.active = false;
     this.report.movesLeft = this.moves;
     if (won && this.moves > 0) {
@@ -341,6 +377,6 @@ export class Game {
     if (session !== this.session) return;
     const stars = won ? starsFor(this.score, this.level.stars) : 0;
     Object.assign(this.report, { won, stars, score: this.score });
-    this.onEnd({ level: this.level, won, score: this.score, stars, report: this.report });
+    this.onEnd({ level: this.level, won, score: this.score, stars, report: this.report, reason });
   }
 }

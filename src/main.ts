@@ -240,6 +240,8 @@ function openLevelCard(lvl: LevelDef) {
   const tips: string[] = [];
   if (lvl.cafe) tips.push(`Serve ${lvl.cafe.serve} customers before they lose patience`);
   if (lvl.ripen) tips.push('Green fruit ripens into golden fruit worth double, but spoils if left too long');
+  if (lvl.tide) tips.push('The tide rises every few moves: match at the waterline to push it back');
+  if (lvl.tilt) tips.push('Use the tilt buttons to change which way fruit falls');
   if (hasSand(lvl)) tips.push('Match fruit on the sand to wash it away');
   if (lvl.coconuts) tips.push('Drop coconuts to the bottom to collect them');
   $('lc-tip').textContent = tips.join(' · ');
@@ -265,6 +267,7 @@ function startLevel(level: LevelDef) {
     return;
   }
   current = level;
+  $('tilt-bar').classList.toggle('hidden', !level.tilt);
   show('game');
   requestAnimationFrame(() => void game.start(level));
 }
@@ -305,7 +308,7 @@ function onLevelEnd(r: LevelResult) {
     sfx.lose();
   }
 
-  $('modal-title').textContent = r.won ? 'Delicious!' : 'Out of moves!';
+  $('modal-title').textContent = r.won ? 'Delicious!' : r.reason === 'flooded' ? 'Flooded! 🌊' : 'Out of moves!';
   const starEls = [...$('modal-stars').children] as HTMLElement[];
   starEls.forEach((el, i) => {
     el.classList.remove('on');
@@ -336,3 +339,8 @@ show('title');
 setupPwa();
 
 if (import.meta.env.DEV) (window as unknown as { __ff: unknown }).__ff = { game, renderer, LEVELS, startLevel, progress, openLevels };
+
+// ---------- island tilt controls ----------
+const tiltBtns = [...document.querySelectorAll<HTMLButtonElement>('.tilt-btn')];
+game.onTiltChange = (g) => tiltBtns.forEach((b) => b.classList.toggle('current', b.dataset.dir === g));
+tiltBtns.forEach((b) => (b.onclick = () => void game.tilt(b.dataset.dir as 'down' | 'up' | 'left' | 'right')));

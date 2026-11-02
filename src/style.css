@@ -288,3 +288,11 @@ body.has-bg-title[data-screen="title"] #scenery > * { display: none; }
 .order.walk .order-stamp { display: flex; background: rgba(120, 120, 130, 0.75); }
 @keyframes walk { 0%, 30% { transform: none; } 100% { transform: translateX(-60px); opacity: 0; } }
 .flyer { position: fixed; z-index: 30; width: 36px; height: 36px; pointer-events: none; transition: transform 0.42s cubic-bezier(0.5, -0.4, 0.6, 1), opacity 0.42s; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.3)); }
+/* ---------- island tilt ---------- */
+.tilt-bar { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 10px max(10px, env(safe-area-inset-bottom)); }
+.tilt-label, .tilt-cost { font-weight: 900; color: #fff; text-shadow: 0 2px 0 rgba(122, 31, 74, 0.6); font-size: 15px; }
+.tilt-cost { font-size: 12px; opacity: 0.9; }
+.tilt-btn { width: 52px; height: 52px; border-radius: 16px; font-size: 24px; background: linear-gradient(#ffffff, #e8fff0); color: #2f8a3a; box-shadow: 0 5px 0 #8fcf9a, 0 8px 14px rgba(0, 0, 0, 0.2); }
+.tilt-btn:active { transform: translateY(4px); box-shadow: 0 1px 0 #8fcf9a; }
+.tilt-btn.current { background: linear-gradient(#7be38a, #3fbf55); color: #fff; box-shadow: 0 5px 0 #23893a, 0 0 14px rgba(120, 255, 140, 0.7); }
+.tilt-bar.busy .tilt-btn { opacity: 0.6; }

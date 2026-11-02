@@ -1,4 +1,4 @@
-import { Board, Cell, FallMove, MUSH, Spawn, Special, Tile, cellKey } from './core/board';
+import { Board, Cell, FallMove, GRAVITY_VEC, MUSH, Spawn, Special, Tile, cellKey } from './core/board';
 import { ClearStep, Cleared, CollectStep, RipenStep, COCONUT_POINTS } from './core/engine';
 import { FRUITS, makeBeeSprite, makeFruitSprite, makeSandSprite, makeMushSprite, tintSprite } from './fruitArt';
 import { Tweener, easeOutQuad, easeInBack, easeOutBack, fallEase, wait } from './tween';
@@ -61,6 +61,10 @@ export class Renderer {
   private sandSprites: HTMLCanvasElement[] = [];
   /** Sand as currently shown (lags the board while animations replay). */
   private sand: number[][] = [];
+  /** Tide as shown (rows, animated) and moves until it next rises. */
+  private tideShown = 0;
+  private tideNext = 0;
+  private tideOn = false;
   private vis = new Map<number, Vis>();
   readonly tweens = new Tweener();
   private particles: Particle[] = [];
@@ -89,6 +93,9 @@ export class Renderer {
     this.selected = null;
     this.hint = null;
     this.sand = board.sand.map((row) => [...row]);
+    this.tideOn = board.tideEvery > 0;
+    this.tideShown = board.tide;
+    this.tideNext = board.tideEvery - board.tideCounter;
     this.resize();
     const intro: Promise<void>[] = [];
     for (let r = 0; r < board.rows; r++) {
@@ -175,6 +182,92 @@ export class Renderer {
     return s;
   }
 
+  /** The tide moves: animate the water level. */
+  async playTide(step: { tide: number; pushed: boolean; change: number; nextRise: number }): Promise<void> {
+    this.tideNext = step.nextRise;
+    const y = this.oy + (this.board!.rows - step.tide) * this.tile;
+    if (step.pushed) this.texts.push({ text: 'Tide pushed back!', x: this.w / 2, y: y - this.tile * 0.6, vy: -0.03, life: 0, max: 1100, color: '#bff4ff', size: this.tile * 0.4, big: false });
+    if (step.change > 0) {
+      this.texts.push({ text: '🌊 The tide rises!', x: this.w / 2, y: y - this.tile * 0.6, vy: -0.03, life: 0, max: 1100, color: '#bff4ff', size: this.tile * 0.4, big: false });
+      sfx.splash();
+    }
+    if (step.change !== 0) {
+      for (let i = 0; i < 14; i++) this.emit('bubble', this.ox + Math.random() * this.tile * this.board!.cols, y, '#d8f6ff', 1, { speed: 0.05, size: 5, g: -0.0003, life: 900, up: 0.05 });
+      await this.tweens.to(this as unknown as { tideShown: number }, { tideShown: step.tide }, 520, easeOutQuad);
+    }
+  }
+
+  /** Island Tilt: the board lurches toward the new gravity. */
+  async playTilt(g: 'down' | 'up' | 'left' | 'right'): Promise<void> {
+    const deg = g === 'left' ? -7 : g === 'right' ? 7 : 0;
+    const dy = g === 'up' ? -10 : g === 'down' ? 10 : 0;
+    this.canvas.style.transition = 'transform 0.18s ease-out';
+    this.canvas.style.transform = `rotate(${deg}deg) translateY(${dy}px)`;
+    sfx.buzz();
+    this.banner({ down: '⬇ Tilt down!', up: '⬆ Tilt up!', left: '⬅ Tilt left!', right: '➡ Tilt right!' }[g], '#c6ffb0');
+    await wait(200);
+    this.canvas.style.transition = 'transform 0.35s cubic-bezier(0.2, 1.6, 0.4, 1)';
+    this.canvas.style.transform = '';
+    await wait(120);
+  }
+
+  private drawWater(now: number, board: Board): void {
+    if (!this.tideOn) return;
+    const ctx = this.ctx, T = this.tile;
+    const bw = T * board.cols;
+    const top = this.oy + (board.rows - this.tideShown) * T;
+    const bottom = this.oy + board.rows * T + 6;
+    if (this.tideShown > 0.02) {
+      ctx.save();
+      const g = ctx.createLinearGradient(0, top, 0, bottom);
+      g.addColorStop(0, 'rgba(60,200,240,0.42)');
+      g.addColorStop(1, 'rgba(20,110,190,0.55)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(this.ox - 6, bottom);
+      for (let x = 0; x <= bw + 12; x += 6) ctx.lineTo(this.ox - 6 + x, top + Math.sin(now / 380 + x / 26) * T * 0.06);
+      ctx.lineTo(this.ox + bw + 6, bottom);
+      ctx.closePath();
+      ctx.fill();
+      // foam line
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = Math.max(2, T * 0.05);
+      ctx.beginPath();
+      for (let x = 0; x <= bw + 12; x += 6) {
+        const yy = top + Math.sin(now / 380 + x / 26) * T * 0.06;
+        if (x === 0) ctx.moveTo(this.ox - 6 + x, yy);
+        else ctx.lineTo(this.ox - 6 + x, yy);
+      }
+      ctx.stroke();
+      // drifting bubbles
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      for (let i = 0; i < 6; i++) {
+        const bx = this.ox + ((i * 97 + now / 30) % bw);
+        const by = bottom - ((now / 18 + i * 53) % Math.max(1, bottom - top));
+        ctx.beginPath();
+        ctx.arc(bx, by, T * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // flood line (the level is lost if the water reaches it)
+    // and a tag saying when the tide rises next
+    const tagY = top - T * 0.18;
+    ctx.save();
+    ctx.font = `900 ${Math.round(T * 0.28)}px "Baloo 2", "Trebuchet MS", system-ui, sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const label = `🌊 rises in ${this.tideNext}`;
+    const w = ctx.measureText(label).width + T * 0.3;
+    const x1 = this.ox + bw + 4;
+    ctx.fillStyle = 'rgba(20,110,190,0.85)';
+    roundRect(ctx, x1 - w, tagY - T * 0.2, w, T * 0.4, T * 0.2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, x1 - T * 0.15, tagY + 1);
+    ctx.restore();
+  }
+
   /** End-of-move ripening: countdowns tick, ripe fruit turns golden, old golden fruit spoils. */
   async playRipen(step: RipenStep): Promise<void> {
     for (const t of step.ticked) {
@@ -242,12 +335,12 @@ export class Renderer {
     const dur = (dist: number) => 150 + 85 * Math.sqrt(Math.max(dist, 0.1));
     for (const f of falls) {
       const v = this.vis.get(f.tile.id);
-      if (v) anims.push(this.tweens.to(v, { y: f.toR }, dur(f.toR - v.y), fallEase));
+      if (v) anims.push(this.tweens.to(v, { x: f.toC, y: f.toR }, dur(Math.abs(f.toR - v.y) + Math.abs(f.toC - v.x)), fallEase));
     }
     for (const s of spawns) {
-      const v: Vis = { x: s.c, y: s.dropFrom, scale: 1, alpha: 1, kind: s.tile.kind, special: s.tile.special, unripe: s.unripe };
+      const v: Vis = { x: s.fromC, y: s.fromR, scale: 1, alpha: 1, kind: s.tile.kind, special: s.tile.special, unripe: s.unripe };
       this.vis.set(s.tile.id, v);
-      anims.push(this.tweens.to(v, { y: s.r }, dur(s.r - s.dropFrom), fallEase));
+      anims.push(this.tweens.to(v, { x: s.c, y: s.r }, dur(Math.abs(s.r - s.fromR) + Math.abs(s.c - s.fromC)), fallEase));
     }
     await Promise.all(anims);
   }
@@ -584,27 +677,29 @@ export class Renderer {
       }
     }
 
-    // coconut levels: arrows under each column's bottom cell show where coconuts are collected
+    // coconut levels: arrows past each lane's far ("downhill") end show where coconuts are collected
     if (board.coconutsToSpawn > 0 || board.coconutsOnBoard() > 0) {
       const bob = Math.sin(now / 220) * T * 0.04;
-      for (let c = 0; c < board.cols; c++) {
-        let bottom = -1;
-        for (let r = board.rows - 1; r >= 0; r--) if (board.mask[r][c]) { bottom = r; break; }
-        if (bottom < 0) continue;
-        const x = this.px(c), y = this.oy + (bottom + 1) * T + T * 0.02 + bob;
+      const [gr, gc] = GRAVITY_VEC[board.gravity];
+      for (const lane of board.lanes()) {
+        const end = lane[lane.length - 1];
+        const cx = this.px(end.c) + gc * (T * 0.62 + bob), cy = this.py(end.r) + gr * (T * 0.62 + bob);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.atan2(gr, gc) - Math.PI / 2);
         ctx.fillStyle = 'rgba(70,170,60,0.9)';
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(x - T * 0.16, y);
-        ctx.lineTo(x + T * 0.16, y);
-        ctx.lineTo(x, y + T * 0.16);
+        ctx.moveTo(-T * 0.16, -T * 0.08);
+        ctx.lineTo(T * 0.16, -T * 0.08);
+        ctx.lineTo(0, T * 0.1);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+        ctx.restore();
       }
     }
-
     // juice splats stain the board briefly
     for (const f of this.fx) if (f.kind === 'splat' && f.t > 0) this.drawSplat(f);
 
@@ -635,6 +730,8 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
     ctx.restore();
+
+    this.drawWater(now, board);
 
     // effects above tiles
     for (const f of this.fx) {

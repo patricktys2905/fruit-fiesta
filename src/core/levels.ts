@@ -32,6 +32,10 @@ export interface LevelDef {
   ripen?: { chance: number; turns?: number };
   /** Goal: pop this many golden (ripe) fruit. */
   golden?: number;
+  /** Tides: rows underwater at the start, moves between rises, rows that flood the board. */
+  tide?: { start: number; every: number; max: number };
+  /** Island Tilt: the player can change gravity (costs a move). */
+  tilt?: boolean;
 }
 
 export interface WorldDef {
@@ -56,6 +60,11 @@ export function createBoard(level: LevelDef, seed = level.seed): Board {
   const placed = b.grid.flat().filter((t) => t?.kind === COCONUT).length;
   b.coconutsToSpawn = Math.max(0, (level.coconuts ?? 0) - placed);
   b.maxCoconuts = level.maxCoconuts ?? 1;
+  if (level.tide) {
+    b.tide = level.tide.start;
+    b.tideEvery = level.tide.every;
+    b.tideMax = level.tide.max;
+  }
   if (level.ripen) {
     b.unripeChance = level.ripen.chance;
     b.ripenTurns = level.ripen.turns ?? 3;
@@ -140,7 +149,7 @@ const COCONUT_COVE: LevelDef[] = [
     ],
   }),
   L({
-    id: 12, name: 'Palm Path', kinds: 5, moves: 22, stars: [2000, 8500, 10500], collect: [],
+    id: 12, name: 'Rising Tide', kinds: 5, moves: 22, tide: { start: 1, every: 4, max: 5 }, stars: [2000, 8000, 10500], collect: [],
     layout: [
       '...  ...',
       '...  ...',
@@ -168,7 +177,7 @@ const COCONUT_COVE: LevelDef[] = [
     ],
   }),
   L({
-    id: 14, name: 'Hidden Lagoon', kinds: 5, moves: 32, stars: [2000, 9500, 11500], collect: [],
+    id: 14, name: 'Hidden Lagoon', kinds: 5, moves: 32, tide: { start: 1, every: 5, max: 5 }, stars: [2000, 10000, 12500], collect: [],
     layout: [
       'ssssssss',
       'ss....ss',
@@ -182,7 +191,7 @@ const COCONUT_COVE: LevelDef[] = [
     ],
   }),
   L({
-    id: 15, name: 'Shell Bay', kinds: 6, moves: 26, stars: [2000, 12500, 15500], collect: [{ kind: 5, count: 22 }],
+    id: 15, name: 'Shell Bay', kinds: 6, moves: 26, tide: { start: 2, every: 4, max: 6 }, stars: [2000, 12000, 15000], collect: [{ kind: 5, count: 22 }],
     layout: [
       '........',
       '........',
@@ -196,7 +205,7 @@ const COCONUT_COVE: LevelDef[] = [
     ],
   }),
   L({
-    id: 16, name: 'Cove Festival', kinds: 5, moves: 34, stars: [3000, 26500, 35000], collect: [], coconuts: 3,
+    id: 16, name: 'Cove Festival', kinds: 5, moves: 34, tide: { start: 1, every: 5, max: 6 }, stars: [3000, 27500, 38000], collect: [], coconuts: 3,
     layout: [
       '...oo...',
       '........',
@@ -227,7 +236,7 @@ const BERRY_MOUNTAIN: LevelDef[] = [
     ],
   }),
   L({
-    id: 18, name: 'Rocky Steps', kinds: 5, moves: 30, stars: [3000, 13500, 20000], collect: [], coconuts: 2, maxCoconuts: 2,
+    id: 18, name: 'Rocky Steps', kinds: 5, moves: 26, tilt: true, stars: [3000, 7500, 10500], collect: [], coconuts: 2, maxCoconuts: 2,
     layout: [
       'o.......',
       '........',
@@ -268,7 +277,7 @@ const BERRY_MOUNTAIN: LevelDef[] = [
     ],
   }),
   L({
-    id: 21, name: 'Avalanche', kinds: 5, moves: 35, stars: [3000, 25500, 33500], collect: [], coconuts: 4, maxCoconuts: 2,
+    id: 21, name: 'Avalanche', kinds: 5, moves: 31, tilt: true, stars: [3000, 9000, 15000], collect: [], coconuts: 4, maxCoconuts: 2,
     layout: [
       'o..oo..o',
       '........',
@@ -296,7 +305,7 @@ const BERRY_MOUNTAIN: LevelDef[] = [
     ],
   }),
   L({
-    id: 23, name: 'Summit Path', kinds: 5, moves: 30, stars: [3000, 11000, 17500], collect: [], coconuts: 3, maxCoconuts: 2,
+    id: 23, name: 'Summit Path', kinds: 5, moves: 30, tilt: true, stars: [3000, 7500, 10500], collect: [], coconuts: 3, maxCoconuts: 2,
     layout: [
       '   oo   ',
       '  ....  ',
@@ -310,7 +319,7 @@ const BERRY_MOUNTAIN: LevelDef[] = [
     ],
   }),
   L({
-    id: 24, name: 'Peak Fiesta', kinds: 5, moves: 34, stars: [4000, 29500, 36000], collect: [], coconuts: 3, maxCoconuts: 2,
+    id: 24, name: 'Peak Fiesta', kinds: 5, moves: 34, tilt: true, tide: { start: 0, every: 6, max: 5 }, stars: [4000, 28000, 34000], collect: [], coconuts: 3, maxCoconuts: 2,
     layout: [
       '...oo...',
       '........',
@@ -332,8 +341,8 @@ const ZIGZAG: [number, number][] = [
 
 export const WORLDS: WorldDef[] = [
   { id: 1, name: 'Sunny Isle', blurb: 'Open your beach café!', map: 'bg-map', spots: ZIGZAG, levels: SUNNY_ISLE },
-  { id: 2, name: 'Coconut Cove', blurb: 'Wash away the sand, catch the coconuts', map: 'bg-map-2', spots: ZIGZAG, levels: COCONUT_COVE },
-  { id: 3, name: 'Berry Mountain', blurb: 'The tallest, juiciest challenge', map: 'bg-map-3', spots: ZIGZAG, levels: BERRY_MOUNTAIN },
+  { id: 2, name: 'Coconut Cove', blurb: 'Sand, coconuts and rising tides', map: 'bg-map-2', spots: ZIGZAG, levels: COCONUT_COVE },
+  { id: 3, name: 'Berry Mountain', blurb: 'Tilt the island to roll the fruit', map: 'bg-map-3', spots: ZIGZAG, levels: BERRY_MOUNTAIN },
 ];
 
 export const LEVELS: LevelDef[] = WORLDS.flatMap((w) => w.levels);
