@@ -1,7 +1,7 @@
 /** Resolves a whole player move (swap → matches → specials → cascades) into a list of
  *  steps. Pure and deterministic: the renderer just replays the steps, and the
  *  simulator uses exactly the same rules. */
-import { Board, Cell, FallMove, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
+import { Board, COCONUT, Cell, FallMove, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
 import { groupScore } from './scoring';
 import { randInt } from './rng';
 
@@ -48,6 +48,8 @@ export interface ClearStep {
   pops: { cell: Cell; points: number }[];
   /** True when the step began with two specials (or a Smoothie) swapped together. */
   combo: boolean;
+  /** Sand layers washed away this step (a cell can appear once per layer removed). */
+  sand: Cell[];
 }
 
 export interface FallStep {
@@ -60,19 +62,34 @@ export interface ShuffleStep {
   type: 'shuffle';
 }
 
-export type Step = ClearStep | FallStep | ShuffleStep;
+/** Coconuts that reached the bottom and were collected. */
+export interface CollectStep {
+  type: 'collect';
+  items: { tile: Tile; r: number; c: number }[];
+}
+
+export type Step = ClearStep | FallStep | ShuffleStep | CollectStep;
 
 export interface MoveResult {
   valid: boolean;
   steps: Step[];
   score: number;
   collected: number[];
+  sandCleared: number;
+  coconuts: number;
 }
 
 export interface EngineCtx {
   /** Fruit kinds the level still needs (bees prefer these). */
   wantedKinds: () => number[];
+  /** Does the level still need sand cleared? (bees then aim for sand) */
+  wantSand?: () => boolean;
 }
+
+/** Points for each layer of sand washed away. */
+export const SAND_POINTS = 60;
+/** Points for each coconut collected. */
+export const COCONUT_POINTS = 500;
 
 /** Points for each extra fruit cleared by a special's blast. */
 export const BLAST_POINTS = 30;
@@ -116,7 +133,7 @@ class StepBuilder {
     const k = cellKey(cell.r, cell.c);
     if (this.protect.has(k) || this.clear.has(k)) return;
     const t = this.board.get(cell.r, cell.c);
-    if (!t) return;
+    if (!t || (t.kind === COCONUT && !t.special)) return; // coconuts can't be blasted
     this.clear.set(k, { r: cell.r, c: cell.c });
     if (t.special && !this.detonated.has(k)) this.queue.push({ r: cell.r, c: cell.c });
   }
@@ -211,13 +228,15 @@ class StepBuilder {
 
   private pickBeeTarget(): Cell | null {
     const wanted = new Set(this.ctx.wantedKinds());
+    const wantSand = this.ctx.wantSand?.() ?? false;
     const preferred: Cell[] = [], any: Cell[] = [];
     for (let r = 0; r < this.board.rows; r++)
       for (let c = 0; c < this.board.cols; c++) {
         const k = cellKey(r, c);
         const t = this.board.get(r, c);
-        if (!t || this.clear.has(k) || this.protect.has(k)) continue;
-        (wanted.has(t.kind) ? preferred : any).push({ r, c });
+        if (!t || t.kind === COCONUT || this.clear.has(k) || this.protect.has(k)) continue;
+        const good = wanted.has(t.kind) || (wantSand && this.board.sand[r][c] > 0);
+        (good ? preferred : any).push({ r, c });
       }
     const pool = preferred.length ? preferred : any;
     return pool.length ? pool[randInt(this.board.rng, pool.length)] : null;
@@ -281,6 +300,9 @@ class StepBuilder {
         for (let r = 0; r < this.board.rows; r++) for (let c = 0; c < this.board.cols; c++) cells.push({ r, c });
         this.blasts.push({ type: 'all', origin: rc, cells });
         cells.forEach((c) => this.consume(c));
+      } else if (other.kind < 0) {
+        // Smoothie + coconut: zap the most common fruit instead.
+        this.effect('rainbow', rc);
       } else if (other.special) {
         this.zapKind(rc, other.kind, other.special);
       } else {
@@ -329,19 +351,28 @@ class StepBuilder {
     }
     const blastCleared = Math.max(0, cleared.length - this.matchedCount);
     this.score += blastCleared * BLAST_POINTS * this.chain;
+    // Sand washes away (one layer) under every fruit cleared or merged into a new special.
+    const sand: Cell[] = [];
+    for (const cell of [...this.clear.values(), ...this.created.map((c) => ({ r: c.r, c: c.c }))]) {
+      if (board.sand[cell.r][cell.c] > 0) {
+        board.sand[cell.r][cell.c]--;
+        sand.push(cell);
+      }
+    }
+    this.score += sand.length * SAND_POINTS;
     board.clear([...this.clear.values()]);
     for (const cr of this.created) {
       cr.tile.special = cr.special;
       if (cr.special === 'rainbow') cr.tile.kind = RAINBOW;
     }
-    return { type: 'clear', chain: this.chain, cleared, created: this.created, blasts: this.blasts, score: this.score, pops: this.pops, combo };
+    return { type: 'clear', chain: this.chain, cleared, created: this.created, blasts: this.blasts, score: this.score, pops: this.pops, combo, sand };
   }
 }
 
 // ---------- full move ----------
 
 export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveResult {
-  const result: MoveResult = { valid: false, steps: [], score: 0, collected: Array(6).fill(0) };
+  const result: MoveResult = { valid: false, steps: [], score: 0, collected: Array(6).fill(0), sandCleared: 0, coconuts: 0 };
   if (!board.isValidSwap(a, b)) return result;
   result.valid = true;
 
@@ -361,6 +392,15 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
     const falls = board.collapse();
     const spawns = board.refill();
     result.steps.push({ type: 'fall', falls, spawns });
+    // Coconuts that reached the bottom are collected; the gap refills.
+    for (let g2 = 0; g2 < 20; g2++) {
+      const items = board.collectCoconuts();
+      if (!items.length) break;
+      result.coconuts += items.length;
+      result.score += items.length * COCONUT_POINTS;
+      result.steps.push({ type: 'collect', items });
+      result.steps.push({ type: 'fall', falls: board.collapse(), spawns: board.refill() });
+    }
     groups = board.findMatches();
     if (!groups.length) break;
     chain++;
@@ -379,5 +419,6 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
   function push(step: ClearStep) {
     result.steps.push(step);
     result.score += step.score;
+    result.sandCleared += step.sand.length;
   }
 }

@@ -346,6 +346,32 @@ export function drawBee(ctx: Ctx) {
   shine(ctx, 0.42, 0.46, 0.07, 0.03, -0.3, 0.6);
 }
 
+/** Coconut: hairy brown shell with three "eyes". */
+function coconut(ctx: Ctx) {
+  ctx.beginPath();
+  ctx.ellipse(0.5, 0.53, 0.38, 0.36, 0, 0, Math.PI * 2);
+  ctx.fillStyle = radial(ctx, 0.38, 0.4, 0.5, [[0, '#b07a48'], [0.55, '#7a4a22'], [1, '#4a2a10']]);
+  ctx.fill();
+  outline(ctx, 'rgba(40,20,5,0.6)');
+  ctx.strokeStyle = 'rgba(210,170,120,0.45)';
+  ctx.lineWidth = 0.012;
+  for (let i = 0; i < 40; i++) {
+    const a = i * 2.39996, d = 0.06 + 0.3 * Math.sqrt((i + 0.5) / 40);
+    const x = 0.5 + Math.cos(a) * d, y = 0.53 + Math.sin(a) * d * 0.95;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a + 1.2) * 0.04, y + Math.sin(a + 1.2) * 0.04);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#2a160a';
+  for (const [x, y] of [[0.42, 0.32], [0.58, 0.32], [0.5, 0.43]]) {
+    ctx.beginPath();
+    ctx.ellipse(x, y, 0.035, 0.03, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  shine(ctx, 0.36, 0.42, 0.08, 0.04, -0.6, 0.3);
+}
+
 const DRAW = [strawberry, orange, lemon, kiwi, grape, blueberry];
 
 function blank(px: number) {
@@ -362,10 +388,10 @@ function drawArt(ctx: Ctx, img: HTMLImageElement, size: number, pad = 0.04) {
   ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
 }
 
-/** Sprite for a fruit kind (0..5) or the Rainbow Smoothie (-1). Uses Gemini art if present. */
+/** Sprite for a fruit kind (0..5), the Rainbow Smoothie (-1) or a coconut (-2). Uses Gemini art if present. */
 export function makeFruitSprite(kind: number, px: number): HTMLCanvasElement {
   const { cv, ctx } = blank(px);
-  const img = art(kind < 0 ? 'smoothie' : `fruit-${kind}`);
+  const img = art(kind === -2 ? 'coconut' : kind < 0 ? 'smoothie' : `fruit-${kind}`);
   ctx.fillStyle = 'rgba(0,40,60,0.22)';
   ctx.beginPath();
   ctx.ellipse(cv.width * 0.5, cv.height * 0.92, cv.width * 0.3, cv.height * 0.06, 0, 0, Math.PI * 2);
@@ -375,8 +401,63 @@ export function makeFruitSprite(kind: number, px: number): HTMLCanvasElement {
     return cv;
   }
   ctx.scale(cv.width, cv.height);
-  (kind < 0 ? smoothie : DRAW[kind])(ctx);
+  (kind === -2 ? coconut : kind < 0 ? smoothie : DRAW[kind])(ctx);
   return cv;
+}
+
+/** Sand patch drawn under fruit: 1 = light sand, 2 = deep sand. */
+export function makeSandSprite(layers: number, px: number): HTMLCanvasElement {
+  const { cv, ctx } = blank(px);
+  const s = cv.width;
+  const r = s * 0.2;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.arcTo(s, 0, s, s, r);
+  ctx.arcTo(s, s, 0, s, r);
+  ctx.arcTo(0, s, 0, 0, r);
+  ctx.arcTo(0, 0, s, 0, r);
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0, 0, s, s);
+  if (layers >= 2) {
+    g.addColorStop(0, '#e6b866');
+    g.addColorStop(1, '#c48a3c');
+  } else {
+    g.addColorStop(0, '#fbe3a6');
+    g.addColorStop(1, '#efc97a');
+  }
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = layers >= 2 ? 'rgba(130,80,20,0.55)' : 'rgba(190,140,60,0.45)';
+  ctx.lineWidth = Math.max(1, s * 0.04);
+  ctx.stroke();
+  // grains and ripples
+  ctx.save();
+  ctx.clip();
+  let seed = layers * 97 + 13;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 40; i++) {
+    ctx.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,0.45)' : 'rgba(150,100,40,0.3)';
+    ctx.beginPath();
+    ctx.arc(rnd() * s, rnd() * s, s * (0.012 + rnd() * 0.02), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(160,110,40,0.25)';
+  ctx.lineWidth = s * 0.025;
+  for (let i = 0; i < (layers >= 2 ? 3 : 2); i++) {
+    const y = s * (0.3 + i * 0.22);
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.1, y);
+    ctx.quadraticCurveTo(s * 0.5, y - s * 0.12, s * 1.1, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  return cv;
+}
+
+let sandIcon = '';
+export function sandIconUrl(): string {
+  if (!sandIcon) sandIcon = makeSandSprite(2, 96).toDataURL();
+  return sandIcon;
 }
 
 export function makeBeeSprite(px: number): HTMLCanvasElement {

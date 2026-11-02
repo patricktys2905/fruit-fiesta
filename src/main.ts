@@ -1,12 +1,14 @@
 import './style.css';
-import { LEVELS, LevelDef } from './core/levels';
+import { LEVELS, LevelDef, WORLDS, WorldDef, hasSand } from './core/levels';
+import { COCONUT } from './core/board';
+import { goalSpecs } from './goals';
 import { Renderer } from './renderer';
 import { Hud } from './hud';
 import { Game, LevelResult } from './game';
 import { sfx } from './audio';
-import { fruitIconUrl, clearIconCache, makeBeeSprite } from './fruitArt';
+import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl } from './fruitArt';
 import { artReady, artUrl } from './art';
-import { setupPwa } from './pwa';
+import { setupPwa, toast } from './pwa';
 import { loadProgress, saveProgress, isUnlocked } from './save';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -53,16 +55,14 @@ $('btn-play').onclick = () => {
   openLevels();
 };
 
-// ---------- level select: island map ----------
+// ---------- level select: world maps ----------
 
-/** Where each level sits on the island map, as % of the map's width/height (bottom → top). */
-const MAP_SPOTS: [number, number][] = [
-  [30, 84], [66, 75], [36, 63], [67, 50], [32, 37], [52, 22],
-];
-
-/** Picture shown on a level's map stop: its goal fruit, or a themed fruit for score levels. */
-function levelFruit(l: LevelDef): number {
-  return l.collect[0]?.kind ?? (l.id - 1) % 6;
+/** Picture shown on a level's map stop and card: its main goal. */
+function levelIcon(l: LevelDef): string {
+  if (l.collect[0]) return fruitIconUrl(l.collect[0].kind);
+  if (l.coconuts) return fruitIconUrl(COCONUT);
+  if (hasSand(l)) return sandIconUrl();
+  return fruitIconUrl((l.id - 1) % 6);
 }
 
 function currentLevelId(): number {
@@ -70,6 +70,8 @@ function currentLevelId(): number {
   const unplayed = open.find((l) => !(progress.stars[l.id] > 0));
   return (unplayed ?? open[open.length - 1]).id;
 }
+
+const worldUnlocked = (w: WorldDef) => isUnlocked(progress, w.levels[0].id);
 
 /** Smooth curve through points (Catmull-Rom → cubic Bézier), in SVG viewBox units. */
 function smoothPath(pts: [number, number][]): string {
@@ -84,76 +86,134 @@ function smoothPath(pts: [number, number][]): string {
   return d;
 }
 
+let viewWorld = 0;
 let beeAtLevel = 0;
 
-function openLevels() {
+function openLevels(worldIndex?: number) {
+  const cur = currentLevelId();
+  viewWorld = worldIndex ?? WORLDS.findIndex((w) => w.levels.some((l) => l.id === cur));
+  show('levels');
+  renderWorld(0);
+}
+
+function renderWorld(direction: number) {
+  const world = WORLDS[viewWorld];
+  const open = worldUnlocked(world);
+  const cur = currentLevelId();
+  const map = $('map');
+
+  $('world-sub').textContent = `World ${world.id}`;
+  $('world-name').textContent = world.name;
+  $('map-blurb').textContent = world.blurb;
+  const art = artUrl(world.map);
+  map.style.backgroundImage = art ? `url("${art}")` : '';
+  map.classList.toggle('locked-world', !open);
+  $('map-lock-text').textContent = viewWorld > 0 ? `Finish ${WORLDS[viewWorld - 1].name} to unlock` : '';
+  $<HTMLButtonElement>('world-prev').disabled = viewWorld === 0;
+  $<HTMLButtonElement>('world-next').disabled = viewWorld === WORLDS.length - 1;
+  if (direction) {
+    map.classList.remove('slide-left', 'slide-right');
+    void map.offsetWidth;
+    map.classList.add(direction > 0 ? 'slide-left' : 'slide-right');
+  }
+
+  const stars = world.levels.reduce((n, l) => n + (progress.stars[l.id] ?? 0), 0);
+  $('total-stars').textContent = `★ ${stars}/${world.levels.length * 3}`;
+
+  // trail
+  const toView = (s: [number, number]): [number, number] => [s[0] * 10, s[1] * 17.9];
+  const pts = world.spots.slice(0, world.levels.length).map(toView);
+  const reached = world.levels.filter((l) => isUnlocked(progress, l.id)).length;
+  $('map-path').innerHTML = `
+    <path d="${smoothPath(pts)}" class="trail-base"/>
+    <path d="${smoothPath(pts)}" class="trail-dots"/>
+    <path d="${smoothPath(pts.slice(0, reached))}" class="trail-done"/>`;
+
+  // stops
   const nodes = $('map-nodes');
   nodes.innerHTML = '';
-  const cur = currentLevelId();
-  const toView = (s: [number, number]): [number, number] => [s[0] * 10, s[1] * 17.9];
-  const all = MAP_SPOTS.slice(0, LEVELS.length).map(toView);
-  const done = all.slice(0, LEVELS.findIndex((l) => l.id === cur) + 1);
-  $('map-path').innerHTML = `
-    <path d="${smoothPath(all)}" class="trail-base"/>
-    <path d="${smoothPath(all)}" class="trail-dots"/>
-    <path d="${smoothPath(done)}" class="trail-done"/>`;
-
-  LEVELS.forEach((lvl, i) => {
-    const [x, y] = MAP_SPOTS[i];
+  world.levels.forEach((lvl, i) => {
+    const [x, y] = world.spots[i];
     const unlocked = isUnlocked(progress, lvl.id);
-    const stars = progress.stars[lvl.id] ?? 0;
+    const s = progress.stars[lvl.id] ?? 0;
     const state = !unlocked ? 'locked' : lvl.id === cur ? 'current' : 'done';
     const btn = document.createElement('button');
     btn.className = `node ${state}`;
     btn.style.left = `${x}%`;
     btn.style.top = `${y}%`;
     btn.style.setProperty('--i', String(i));
-    btn.setAttribute('aria-label', `Level ${lvl.id}, ${lvl.name}${unlocked ? `, ${stars} stars` : ', locked'}`);
+    btn.setAttribute('aria-label', `Level ${lvl.id}, ${lvl.name}${unlocked ? `, ${s} stars` : ', locked'}`);
     btn.innerHTML = `
-      <span class="node-stars">${[0, 1, 2].map((s) => `<i class="${s < stars ? 'on' : ''}">★</i>`).join('')}</span>
-      <span class="node-disc"><img alt="" src="${fruitIconUrl(levelFruit(lvl))}">${unlocked ? '' : '<span class="node-lock">🔒</span>'}</span>
+      <span class="node-stars">${[0, 1, 2].map((k) => `<i class="${k < s ? 'on' : ''}">★</i>`).join('')}</span>
+      <span class="node-disc"><img alt="" src="${levelIcon(lvl)}">${unlocked ? '' : '<span class="node-lock">🔒</span>'}</span>
       <span class="node-num">${lvl.id}</span>`;
     if (unlocked) btn.onclick = () => openLevelCard(lvl);
     nodes.appendChild(btn);
   });
 
-  const total = Object.values(progress.stars).reduce((a, b) => a + b, 0);
-  $('total-stars').textContent = `★ ${total}/${LEVELS.length * 3}`;
-  show('levels');
-
   // The bee marks where you are, and flies to the next stop after a win.
   const bee = $<HTMLImageElement>('map-bee');
+  const curIndex = world.levels.findIndex((l) => l.id === cur);
+  bee.classList.toggle('hidden', curIndex < 0);
+  if (curIndex < 0) return;
   bee.src = artUrl('bee') ?? makeBeeSprite(128).toDataURL();
   const place = (id: number) => {
-    const [x, y] = MAP_SPOTS[LEVELS.findIndex((l) => l.id === id)];
+    const [x, y] = world.spots[world.levels.findIndex((l) => l.id === id)];
     bee.style.left = `${x}%`;
     bee.style.top = `${y}%`;
   };
-  if (beeAtLevel && beeAtLevel !== cur) {
+  const prevIndex = world.levels.findIndex((l) => l.id === beeAtLevel);
+  const jump = () => {
     bee.classList.add('no-anim');
-    place(beeAtLevel);
     void bee.offsetWidth;
     bee.classList.remove('no-anim');
+  };
+  if (beeAtLevel && beeAtLevel !== cur && prevIndex >= 0) {
+    bee.classList.add('no-anim');
+    place(beeAtLevel);
+    jump();
     setTimeout(() => {
       place(cur);
       sfx.buzz();
       setTimeout(() => {
-        const node = nodes.children[LEVELS.findIndex((l) => l.id === cur)] as HTMLElement | undefined;
-        node?.classList.add('just-unlocked');
+        (nodes.children[curIndex] as HTMLElement | undefined)?.classList.add('just-unlocked');
         sfx.create();
       }, 1000);
     }, 450);
   } else {
     bee.classList.add('no-anim');
     place(cur);
-    void bee.offsetWidth;
-    bee.classList.remove('no-anim');
+    jump();
+    if (beeAtLevel && beeAtLevel !== cur && curIndex === 0) {
+      toast(`🎉 ${world.name} unlocked!`);
+      (nodes.children[0] as HTMLElement | undefined)?.classList.add('just-unlocked');
+      sfx.win();
+    }
   }
   beeAtLevel = cur;
+  (nodes.children[curIndex] as HTMLElement | undefined)?.scrollIntoView({ block: 'center' });
+}
 
-  // Keep the current stop in view on short screens.
-  const node = nodes.children[LEVELS.findIndex((l) => l.id === cur)] as HTMLElement | undefined;
-  node?.scrollIntoView({ block: 'center' });
+function changeWorld(delta: number) {
+  const next = viewWorld + delta;
+  if (next < 0 || next >= WORLDS.length) return;
+  viewWorld = next;
+  sfx.select();
+  renderWorld(delta);
+}
+$('world-prev').onclick = () => changeWorld(-1);
+$('world-next').onclick = () => changeWorld(1);
+{
+  // swipe between worlds
+  let sx = 0, sy = 0, tracking = false;
+  const area = $('map-scroll');
+  area.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; tracking = true; });
+  area.addEventListener('pointerup', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) changeWorld(dx < 0 ? 1 : -1);
+  });
 }
 $('btn-levels-back').onclick = () => show('title');
 
@@ -162,14 +222,19 @@ let cardLevel: LevelDef = LEVELS[0];
 function openLevelCard(lvl: LevelDef) {
   sfx.select();
   cardLevel = lvl;
-  $<HTMLImageElement>('lc-fruit').src = fruitIconUrl(levelFruit(lvl));
+  $<HTMLImageElement>('lc-fruit').src = levelIcon(lvl);
   $('lc-level').textContent = `Level ${lvl.id}`;
   $('lc-name').textContent = lvl.name;
   const stars = progress.stars[lvl.id] ?? 0;
   [...$('lc-stars').children].forEach((el, i) => el.classList.toggle('on', i < stars));
-  $('lc-goal').innerHTML = lvl.collect.length
-    ? lvl.collect.map((g) => `<span class="lc-goal-item"><img alt="" src="${fruitIconUrl(g.kind)}"><b>${g.count}</b></span>`).join('')
+  const specs = goalSpecs(lvl);
+  $('lc-goal').innerHTML = specs.length
+    ? specs.map((g) => `<span class="lc-goal-item"><img alt="${g.label}" src="${g.icon}"><b>${g.count}</b></span>`).join('')
     : `<span class="lc-goal-item score"><b>${lvl.stars[0].toLocaleString()}</b> points</span>`;
+  const tips: string[] = [];
+  if (hasSand(lvl)) tips.push('Match fruit on the sand to wash it away');
+  if (lvl.coconuts) tips.push('Drop coconuts to the bottom to collect them');
+  $('lc-tip').textContent = tips.join(' · ');
   $('lc-moves').textContent = String(lvl.moves);
   $('level-card').classList.remove('hidden');
 }

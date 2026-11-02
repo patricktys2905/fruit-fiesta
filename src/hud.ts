@@ -1,5 +1,5 @@
 import { LevelDef } from './core/levels';
-import { fruitIconUrl } from './fruitArt';
+import { GoalSpec } from './goals';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -27,7 +27,7 @@ export class Hud {
     requestAnimationFrame(tick);
   }
 
-  setLevel(level: LevelDef): void {
+  setLevel(level: LevelDef, specs: GoalSpec[]): void {
     this.level = level;
     this.levelName.textContent = `Level ${level.id} · ${level.name}`;
     this.shownScore = this.targetScore = 0;
@@ -39,33 +39,34 @@ export class Hud {
     });
     this.goals.innerHTML = '';
     this.goalCounts = [];
-    if (level.collect.length === 0) {
+    if (specs.length === 0) {
       const div = document.createElement('div');
       div.className = 'goal goal-score';
       div.innerHTML = `<span class="goal-label">Score</span><span class="goal-count">${level.stars[0].toLocaleString()}</span>`;
       this.goals.appendChild(div);
     }
-    for (const g of level.collect) {
+    for (const g of specs) {
       const div = document.createElement('div');
-      div.className = 'goal';
-      div.innerHTML = `<img alt="" src="${fruitIconUrl(g.kind)}"><span class="goal-count">${g.count}</span>`;
+      div.className = `goal goal-${g.key}`;
+      div.innerHTML = `<img alt="${g.label}" src="${g.icon}"><span class="goal-count">${g.count}</span>`;
       this.goals.appendChild(div);
       this.goalCounts.push(div.querySelector('.goal-count')!);
     }
   }
 
-  update(score: number, moves: number, collected: number[]): void {
+  /** `left` lines up with the specs given to setLevel. */
+  update(score: number, moves: number, left: number[]): void {
     this.targetScore = score;
     this.moves.textContent = String(moves);
     this.moves.classList.toggle('low', moves <= 5);
     const max = this.level.stars[2];
     this.fill.style.width = `${Math.min(100, (score / max) * 100)}%`;
     this.starEls.forEach((el, i) => el.classList.toggle('lit', score >= this.level.stars[i]));
-    this.level.collect.forEach((g, i) => {
-      const left = Math.max(0, g.count - collected[g.kind]);
+    left.forEach((n, i) => {
       const el = this.goalCounts[i];
-      const done = left === 0;
-      el.textContent = done ? '✓' : String(left);
+      if (!el) return;
+      const done = n <= 0;
+      el.textContent = done ? '✓' : String(n);
       el.parentElement!.classList.toggle('done', done);
     });
   }

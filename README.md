@@ -21,6 +21,20 @@ npm run build      # production build into dist/
 
 Swap two specials together for a Super Combo.
 
+## Worlds
+| World | Levels | New ideas |
+|---|---|---|
+| 1. Sunny Isle | 1-8 | fruit goals, score goals, a heart-shaped board |
+| 2. Coconut Cove | 9-16 | **sand** (match on it to wash it away, deep sand takes 2) and **coconuts** (drop them to the bottom) |
+| 3. Berry Mountain | 17-24 | shaped boards with gaps, everything combined |
+
+Levels live in `src/core/levels.ts`. Layout strings: `.` cell, ` ` gap, `s` sand, `S` deep sand, `o` coconut.
+Tune with `npm run sim -- <fromId> <toId>`, which prints win rates and a suggested star curve.
+
+## Publishing
+Pushing to `main` runs the GitHub Actions workflow: tests, build, then deploy to
+https://patricktys2905.github.io/fruit-fiesta/. It's an installable PWA and the whole game is cached for offline play.
+
 ## Custom art (Gemini)
 Prompts are in `art-src/PROMPTS.md`. Save images to `art-src/raw/` with the listed names and run
 `npm run art`, which removes backgrounds, trims and resizes them into `src/art/`. The game uses any art it

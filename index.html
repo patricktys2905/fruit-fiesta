@@ -69,14 +69,20 @@
     <section id="screen-levels" class="screen hidden">
       <div class="levels-head">
         <button id="btn-levels-back" class="icon-btn" aria-label="Back">‹</button>
-        <div class="world-banner"><span class="world-sub">World 1</span><span class="world-name">Sunny Isle</span></div>
+        <div class="world-banner"><span class="world-sub" id="world-sub">World 1</span><span class="world-name" id="world-name">Sunny Isle</span></div>
         <span id="total-stars" class="total-stars"></span>
       </div>
       <div class="map-scroll" id="map-scroll">
-        <div class="map" id="map">
-          <svg id="map-path" viewBox="0 0 1000 1790" preserveAspectRatio="none" aria-hidden="true"></svg>
-          <div id="map-nodes"></div>
-          <img id="map-bee" class="map-bee" alt="" />
+        <div class="map-wrap">
+          <button id="world-prev" class="world-arrow prev" aria-label="Previous world">‹</button>
+          <div class="map" id="map">
+            <svg id="map-path" viewBox="0 0 1000 1790" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div id="map-nodes"></div>
+            <img id="map-bee" class="map-bee" alt="" />
+            <p id="map-blurb" class="map-blurb"></p>
+            <div class="map-lock"><span class="map-lock-icon">🔒</span><span id="map-lock-text"></span></div>
+          </div>
+          <button id="world-next" class="world-arrow next" aria-label="Next world">›</button>
         </div>
       </div>
     </section>
@@ -93,6 +99,7 @@
           <span class="lc-label">Goal</span>
           <div id="lc-goal" class="lc-goal"></div>
           <span class="lc-moves"><b id="lc-moves"></b> moves</span>
+          <span id="lc-tip" class="lc-tip"></span>
         </div>
         <button id="lc-play" class="big-btn lc-play">Play</button>
       </div>

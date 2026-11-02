@@ -1,6 +1,6 @@
 import { Board, Cell, FallMove, Spawn, Special, Tile, cellKey } from './core/board';
-import { ClearStep, Cleared } from './core/engine';
-import { FRUITS, makeBeeSprite, makeFruitSprite } from './fruitArt';
+import { ClearStep, Cleared, CollectStep, COCONUT_POINTS } from './core/engine';
+import { FRUITS, makeBeeSprite, makeFruitSprite, makeSandSprite } from './fruitArt';
 import { Tweener, easeOutQuad, easeInBack, easeOutBack, fallEase, wait } from './tween';
 import { sfx } from './audio';
 
@@ -56,6 +56,9 @@ export class Renderer {
   private oy = 0;
   private sprites = new Map<number, HTMLCanvasElement>();
   private beeSprite: HTMLCanvasElement | null = null;
+  private sandSprites: HTMLCanvasElement[] = [];
+  /** Sand as currently shown (lags the board while animations replay). */
+  private sand: number[][] = [];
   private vis = new Map<number, Vis>();
   readonly tweens = new Tweener();
   private particles: Particle[] = [];
@@ -83,11 +86,13 @@ export class Renderer {
     this.tweens.clear();
     this.selected = null;
     this.hint = null;
+    this.sand = board.sand.map((row) => [...row]);
     this.resize();
     const intro: Promise<void>[] = [];
     for (let r = 0; r < board.rows; r++) {
       for (let c = 0; c < board.cols; c++) {
-        const t = board.grid[r][c]!;
+        const t = board.grid[r][c];
+        if (!t) continue;
         const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special };
         this.vis.set(t.id, v);
         intro.push(this.tweens.to(v, { y: r }, 420 + r * 25, fallEase, (board.rows - r) * 30 + c * 12));
@@ -100,6 +105,30 @@ export class Renderer {
   refreshSprites(): void {
     this.sprites.clear();
     this.beeSprite = null;
+    this.sandSprites = [];
+  }
+
+  private sandSprite(layers: number): HTMLCanvasElement {
+    if (!this.sandSprites[layers]) this.sandSprites[layers] = makeSandSprite(layers, (this.tile - 3) * this.dpr);
+    return this.sandSprites[layers];
+  }
+
+  /** Coconuts reaching the bottom roll off the board and are collected. */
+  async playCollect(step: CollectStep): Promise<void> {
+    sfx.combo();
+    await Promise.all(
+      step.items.map(async (it) => {
+        const v = this.vis.get(it.tile.id);
+        if (!v) return;
+        const x = this.px(it.c), y = this.py(it.r);
+        this.sparkle(x, y, '#fff3a0', 12);
+        this.fx.push({ kind: 'ring', t: 0, dur: 500, x, y, r: this.tile, color: '#ffe680', width: this.tile * 0.12 });
+        this.texts.push({ text: `+${COCONUT_POINTS}`, x, y: y - this.tile * 0.5, vy: -0.04, life: 0, max: 900, color: '#fff36b', size: this.tile * 0.42, big: false });
+        await this.tweens.to(v, { scale: 1.35 }, 140, easeOutQuad);
+        await this.tweens.to(v, { y: v.y + 1.4, scale: 0.6, alpha: 0 }, 320, easeInBack);
+        this.vis.delete(it.tile.id);
+      }),
+    );
   }
 
   resize(): void {
@@ -180,8 +209,8 @@ export class Renderer {
     const anims: Promise<void>[] = [];
     for (let r = 0; r < board.rows; r++) {
       for (let c = 0; c < board.cols; c++) {
-        const t = board.grid[r][c]!;
-        const v = this.vis.get(t.id);
+        const t = board.grid[r][c];
+        const v = t && this.vis.get(t.id);
         if (!v) continue;
         anims.push(this.tweens.to(v, { x: c, y: r }, 420, easeOutBack, (r + c) * 12));
       }
@@ -323,6 +352,20 @@ export class Renderer {
         }),
       );
     }
+    // Sand washes away as the fruit on it pops.
+    for (const cell of step.sand) {
+      const d = D(cell) + 60;
+      anims.push(
+        wait(d).then(() => {
+          const row = this.sand[cell.r];
+          if (row && row[cell.c] > 0) row[cell.c]--;
+          const x = this.px(cell.c), y = this.py(cell.r);
+          this.emit('drop', x, y, '#e8c27a', 7, { speed: 0.18, size: 3.5 });
+          this.emit('glint', x, y, '#fff4d0', 2, { speed: 0.08, size: 5, g: 0, life: 400, up: 0 });
+        }),
+      );
+    }
+    if (step.sand.length) later(80, () => sfx.splash());
     if (step.chain >= 3) this.shake = Math.max(this.shake, Math.min(10, 2 + step.chain * 1.5));
     await Promise.all(anims);
   }
@@ -470,18 +513,47 @@ export class Renderer {
     const T = this.tile;
     const bw = T * board.cols, bh = T * board.rows;
 
-    // board tray
-    ctx.fillStyle = 'rgba(255,255,255,0.32)';
-    roundRect(ctx, this.ox - 8, this.oy - 8, bw + 16, bh + 16, 18);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    // board tray: follows the board's shape (holes show the background)
+    ctx.fillStyle = 'rgba(255,255,255,0.34)';
+    for (let r = 0; r < board.rows; r++)
+      for (let c = 0; c < board.cols; c++)
+        if (board.mask[r][c]) {
+          roundRect(ctx, this.ox + c * T - 6, this.oy + r * T - 6, T + 12, T + 12, 14);
+          ctx.fill();
+        }
     for (let r = 0; r < board.rows; r++) {
       for (let c = 0; c < board.cols; c++) {
-        ctx.fillStyle = (r + c) % 2 ? 'rgba(255,255,255,0.22)' : 'rgba(255,250,235,0.42)';
-        roundRect(ctx, this.ox + c * T + 1.5, this.oy + r * T + 1.5, T - 3, T - 3, T * 0.18);
+        if (!board.mask[r][c]) continue;
+        const x = this.ox + c * T + 1.5, y = this.oy + r * T + 1.5;
+        const layers = this.sand[r]?.[c] ?? 0;
+        if (layers > 0) {
+          ctx.drawImage(this.sandSprite(Math.min(layers, 2)), x, y, T - 3, T - 3);
+        } else {
+          ctx.fillStyle = (r + c) % 2 ? 'rgba(255,255,255,0.22)' : 'rgba(255,250,235,0.42)';
+          roundRect(ctx, x, y, T - 3, T - 3, T * 0.18);
+          ctx.fill();
+        }
+      }
+    }
+
+    // coconut levels: arrows under each column's bottom cell show where coconuts are collected
+    if (board.coconutsToSpawn > 0 || board.coconutsOnBoard() > 0) {
+      const bob = Math.sin(now / 220) * T * 0.04;
+      for (let c = 0; c < board.cols; c++) {
+        let bottom = -1;
+        for (let r = board.rows - 1; r >= 0; r--) if (board.mask[r][c]) { bottom = r; break; }
+        if (bottom < 0) continue;
+        const x = this.px(c), y = this.oy + (bottom + 1) * T + T * 0.02 + bob;
+        ctx.fillStyle = 'rgba(70,170,60,0.9)';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - T * 0.16, y);
+        ctx.lineTo(x + T * 0.16, y);
+        ctx.lineTo(x, y + T * 0.16);
+        ctx.closePath();
         ctx.fill();
+        ctx.stroke();
       }
     }
 

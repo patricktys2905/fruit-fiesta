@@ -39,18 +39,44 @@ export interface Spawn {
 
 export const cellKey = (r: number, c: number) => r * 1000 + c;
 
-/** Pure game-board logic: no rendering, fully deterministic for a given RNG. */
+/** Kind used by coconuts: can't be matched or blasted; drop them to the bottom to collect. */
+export const COCONUT = -2;
+
+/** Pure game-board logic: no rendering, fully deterministic for a given RNG.
+ *
+ *  Optional layout strings (one per row) shape the board:
+ *    '.' normal cell   ' ' or '#' hole (no cell; fruit falls straight past)
+ *    's' sand          'S' deep sand (2 layers)     'o' starts with a coconut */
 export class Board {
   grid: (Tile | null)[][];
+  /** Playable cells (false = hole). */
+  mask: boolean[][];
+  /** Sand layers under each cell. */
+  sand: number[][];
+  /** Coconuts still to drop in from the top during play. */
+  coconutsToSpawn = 0;
+  /** Max coconuts on the board at once. */
+  maxCoconuts = 1;
   private nextId = 1;
+  private layout: string[] | null;
 
   constructor(
     readonly cols: number,
     readonly rows: number,
     readonly kinds: number,
     readonly rng: Rng,
+    layout?: string[],
   ) {
+    this.layout = layout ?? null;
     this.grid = Array.from({ length: rows }, () => Array<Tile | null>(cols).fill(null));
+    this.mask = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => {
+      const ch = layout?.[r]?.[c] ?? '.';
+      return ch !== ' ' && ch !== '#';
+    }));
+    this.sand = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => {
+      const ch = layout?.[r]?.[c];
+      return ch === 's' ? 1 : ch === 'S' ? 2 : 0;
+    }));
   }
 
   get(r: number, c: number): Tile | null {
@@ -58,8 +84,39 @@ export class Board {
     return this.grid[r][c];
   }
 
+  /** A real cell on the board (inside the grid and not a hole). */
   inBounds(cell: Cell): boolean {
-    return cell.r >= 0 && cell.c >= 0 && cell.r < this.rows && cell.c < this.cols;
+    return cell.r >= 0 && cell.c >= 0 && cell.r < this.rows && cell.c < this.cols && this.mask[cell.r][cell.c];
+  }
+
+  /** Playable rows of a column, top to bottom. */
+  private columnRows(c: number): number[] {
+    const out: number[] = [];
+    for (let r = 0; r < this.rows; r++) if (this.mask[r][c]) out.push(r);
+    return out;
+  }
+
+  sandLeft(): number {
+    return this.sand.flat().reduce((a, b) => a + b, 0);
+  }
+
+  coconutsOnBoard(): number {
+    return this.grid.flat().filter((t) => t?.kind === COCONUT).length;
+  }
+
+  /** Coconuts sitting in the bottom cell of their column are collected (removed). */
+  collectCoconuts(): { tile: Tile; r: number; c: number }[] {
+    const out: { tile: Tile; r: number; c: number }[] = [];
+    for (let c = 0; c < this.cols; c++) {
+      const rows = this.columnRows(c);
+      const r = rows[rows.length - 1];
+      const t = r === undefined ? null : this.grid[r][c];
+      if (t && t.kind === COCONUT) {
+        out.push({ tile: t, r, c });
+        this.grid[r][c] = null;
+      }
+    }
+    return out;
   }
 
   newTile(kind: number, special?: Special): Tile {
@@ -78,6 +135,14 @@ export class Board {
     for (let attempt = 0; attempt < 200; attempt++) {
       for (let r = 0; r < this.rows; r++) {
         for (let c = 0; c < this.cols; c++) {
+          if (!this.mask[r][c]) {
+            this.grid[r][c] = null;
+            continue;
+          }
+          if (this.layout?.[r]?.[c] === 'o') {
+            this.grid[r][c] = this.newTile(COCONUT);
+            continue;
+          }
           const banned = new Set<number>();
           const l1 = this.get(r, c - 1), l2 = this.get(r, c - 2);
           if (l1 && l2 && l1.kind === l2.kind) banned.add(l1.kind);
@@ -209,40 +274,51 @@ export class Board {
     return removed;
   }
 
-  /** Drop tiles down into empty spaces. */
+  /** Drop tiles down into empty spaces (falling straight past holes). */
   collapse(): FallMove[] {
     const moves: FallMove[] = [];
     for (let c = 0; c < this.cols; c++) {
-      let write = this.rows - 1;
-      for (let r = this.rows - 1; r >= 0; r--) {
+      const rows = this.columnRows(c);
+      let w = rows.length - 1;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const r = rows[i];
         const t = this.grid[r][c];
         if (!t) continue;
-        if (r !== write) {
-          this.grid[write][c] = t;
+        const target = rows[w];
+        if (r !== target) {
+          this.grid[target][c] = t;
           this.grid[r][c] = null;
-          moves.push({ tile: t, fromR: r, toR: write, c });
+          moves.push({ tile: t, fromR: r, toR: target, c });
         }
-        write--;
+        w--;
       }
     }
     return moves;
   }
 
-  /** Fill empty cells (at the top after collapse) with new fruit. */
+  /** Fill empty cells (at the top after collapse) with new fruit, and the odd coconut. */
   refill(): Spawn[] {
     const spawns: Spawn[] = [];
+    let coconutRoom = this.coconutsToSpawn > 0 ? Math.max(0, this.maxCoconuts - this.coconutsOnBoard()) : 0;
     for (let c = 0; c < this.cols; c++) {
+      const rows = this.columnRows(c);
       let empty = 0;
-      while (empty < this.rows && !this.grid[empty][c]) empty++;
-      for (let r = 0; r < empty; r++) {
-        const t = this.newTile(randInt(this.rng, this.kinds));
+      while (empty < rows.length && !this.grid[rows[empty]][c]) empty++;
+      for (let i = 0; i < empty; i++) {
+        const r = rows[i];
+        let kind = randInt(this.rng, this.kinds);
+        if (coconutRoom > 0 && this.coconutsToSpawn > 0 && i === 0 && this.rng() < 0.3) {
+          kind = COCONUT;
+          coconutRoom--;
+          this.coconutsToSpawn--;
+        }
+        const t = this.newTile(kind);
         this.grid[r][c] = t;
-        spawns.push({ tile: t, r, c, dropFrom: r - empty });
+        spawns.push({ tile: t, r, c, dropFrom: (rows[0] ?? 0) - (empty - i) });
       }
     }
     return spawns;
   }
-
   /** First legal swap, or null if the board is stuck. */
   findHint(): [Cell, Cell] | null {
     for (let r = 0; r < this.rows; r++) {
@@ -272,14 +348,20 @@ export class Board {
 
   /** Rearrange existing fruit until there are no matches and a move exists. */
   shuffle(): void {
-    const tiles = this.grid.flat().filter((t): t is Tile => !!t);
+    // Only fruit moves; holes and coconuts stay put.
+    const cells: Cell[] = [];
+    for (let r = 0; r < this.rows; r++)
+      for (let c = 0; c < this.cols; c++) {
+        const t = this.grid[r][c];
+        if (t && t.kind !== COCONUT) cells.push({ r, c });
+      }
+    const tiles = cells.map(({ r, c }) => this.grid[r][c]!);
     for (let attempt = 0; attempt < 500; attempt++) {
       for (let i = tiles.length - 1; i > 0; i--) {
         const j = randInt(this.rng, i + 1);
         [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
       }
-      let i = 0;
-      for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) this.grid[r][c] = tiles[i++];
+      cells.forEach(({ r, c }, i) => (this.grid[r][c] = tiles[i]));
       if (this.findMatches().length === 0 && this.findHint()) return;
     }
     // Extremely unlikely fallback: regenerate.

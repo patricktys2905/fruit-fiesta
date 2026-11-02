@@ -1,11 +1,11 @@
 import { Board, Cell } from './core/board';
-import { playMove, Step } from './core/engine';
-import { LevelDef } from './core/levels';
-import { mulberry32 } from './core/rng';
+import { playMove, Step, COCONUT_POINTS } from './core/engine';
+import { LevelDef, createBoard, hasSand } from './core/levels';
 import { starsFor, LEFTOVER_MOVE_BONUS } from './core/scoring';
 import { Renderer } from './renderer';
 import { Hud } from './hud';
 import { sfx } from './audio';
+import { GoalSpec, goalSpecs } from './goals';
 import { wait } from './tween';
 
 export interface LevelResult {
@@ -24,6 +24,8 @@ export class Game {
   private score = 0;
   private moves = 0;
   private collected: number[] = [];
+  private coconuts = 0;
+  private specs: GoalSpec[] = [];
   private busy = true;
   private active = false;
   private drag: { cell: Cell; x: number; y: number } | null = null;
@@ -49,13 +51,15 @@ export class Game {
     this.score = 0;
     this.moves = level.moves;
     this.collected = Array(6).fill(0);
-    this.board = new Board(level.cols, level.rows, level.kinds, mulberry32(seedOverride ?? level.seed));
-    this.board.fillInitial();
+    this.coconuts = 0;
+    this.board = createBoard(level, seedOverride ?? level.seed);
+    this.specs = goalSpecs(level);
+    this.shownSand = this.board.sandLeft();
     this.busy = true;
     this.active = true;
     this.drag = null;
-    this.hud.setLevel(level);
-    this.hud.update(0, this.moves, this.collected);
+    this.hud.setLevel(level, this.specs);
+    this.updateHud();
     await this.renderer.setBoard(this.board);
     if (session !== this.session) return;
     this.busy = false;
@@ -129,6 +133,19 @@ export class Game {
 
   // ---------- core turn ----------
 
+  /** Sand still showing on screen (the board itself may be ahead while animations replay). */
+  private shownSand = 0;
+
+  private goalsLeft(): number[] {
+    return this.specs.map((g) =>
+      g.key === 'fruit' ? g.count - this.collected[g.kind!] : g.key === 'sand' ? this.shownSand : g.count - this.coconuts,
+    );
+  }
+
+  private updateHud(): void {
+    this.hud.update(this.score, this.moves, this.goalsLeft());
+  }
+
   private wantedKinds(): number[] {
     return this.level.collect.filter((g) => this.collected[g.kind] < g.count).map((g) => g.kind);
   }
@@ -138,13 +155,17 @@ export class Game {
     const session = this.session;
     this.busy = true;
     this.renderer.hint = null;
-    const ta = this.board.get(a.r, a.c)!, tb = this.board.get(b.r, b.c)!;
+    const ta = this.board.get(a.r, a.c), tb = this.board.get(b.r, b.c);
+    if (!ta || !tb) {
+      this.busy = false;
+      return;
+    }
 
     sfx.swap();
     await Promise.all([this.renderer.moveTile(ta, b.r, b.c), this.renderer.moveTile(tb, a.r, a.c)]);
     if (session !== this.session) return;
 
-    const result = playMove(this.board, a, b, { wantedKinds: () => this.wantedKinds() });
+    const result = playMove(this.board, a, b, { wantedKinds: () => this.wantedKinds(), wantSand: () => hasSand(this.level) && this.board.sandLeft() > 0 });
     if (!result.valid) {
       sfx.invalid();
       await Promise.all([this.renderer.moveTile(ta, a.r, a.c, 170), this.renderer.moveTile(tb, b.r, b.c, 170)]);
@@ -156,11 +177,11 @@ export class Game {
     }
 
     this.moves--;
-    this.hud.update(this.score, this.moves, this.collected);
+    this.updateHud();
     await this.replay(result.steps, session);
     if (session !== this.session) return;
 
-    if (this.isWon() && this.level.collect.length > 0) return this.finish(true, session);
+    if (this.isWon() && this.specs.length > 0) return this.finish(true, session);
     if (this.moves <= 0) return this.finish(this.isWon(), session);
     this.busy = false;
     this.idleSince = performance.now();
@@ -195,11 +216,19 @@ export class Game {
             sfx.combo();
           }
         }
-        this.hud.update(this.score, this.moves, this.collected);
+        this.shownSand -= step.sand.length;
+        if (step.sand.length && hasSand(this.level)) goalHit = true;
+        this.updateHud();
         if (goalHit) this.hud.bump();
         await this.renderer.playClear(step);
       } else if (step.type === 'fall') {
         await this.renderer.dropTiles(step.falls, step.spawns);
+      } else if (step.type === 'collect') {
+        this.coconuts += step.items.length;
+        this.score += step.items.length * COCONUT_POINTS;
+        this.updateHud();
+        this.hud.bump();
+        await this.renderer.playCollect(step);
       } else {
         this.renderer.banner('Shuffle!', '#9ff');
         sfx.shuffle();
@@ -209,7 +238,7 @@ export class Game {
   }
 
   private isWon(): boolean {
-    return this.score >= this.level.stars[0] && this.level.collect.every((g) => this.collected[g.kind] >= g.count);
+    return this.score >= this.level.stars[0] && this.goalsLeft().every((n) => n <= 0);
   }
 
   private async finish(won: boolean, session: number): Promise<void> {
@@ -220,7 +249,7 @@ export class Game {
       sfx.combo();
       this.score += bonus;
       this.moves = 0;
-      this.hud.update(this.score, this.moves, this.collected);
+      this.updateHud();
       await wait(1100);
     } else {
       await wait(500);

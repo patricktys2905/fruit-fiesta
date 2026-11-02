@@ -13,8 +13,8 @@ import path from 'node:path';
 
 const RAW = path.resolve('art-src/raw');
 const OUT = path.resolve('src/art');
-const SPRITE = /^(fruit-[0-5]|smoothie|bee|logo)$/;
-const BACKGROUND = /^bg-(game|title|map)$/;
+const SPRITE = /^(fruit-[0-5]|smoothie|bee|coconut|logo)$/;
+const BACKGROUND = /^bg-(game|title|map(-\d+)?)$/;
 
 fs.mkdirSync(OUT, { recursive: true });
 const files = fs.existsSync(RAW) ? fs.readdirSync(RAW).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)) : [];
