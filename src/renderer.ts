@@ -759,12 +759,23 @@ export class Renderer {
       const k = t.life / t.max;
       const pop = t.big ? (k < 0.15 ? easeOutBack(k / 0.15) : 1) : 1;
       ctx.globalAlpha = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
-      ctx.font = `900 ${Math.max(1, Math.round(t.size * pop))}px "Baloo 2", "Trebuchet MS", system-ui, sans-serif`;
-      ctx.lineWidth = Math.max(3, t.size * 0.16);
+      // Shrink text that would be wider than the screen, and keep it fully on-screen.
+      const font = (px: number) => `900 ${Math.max(1, Math.round(px))}px "Baloo 2", "Trebuchet MS", system-ui, sans-serif`;
+      let size = t.size * pop;
+      ctx.font = font(size);
+      const maxW = this.w - 20;
+      let tw = ctx.measureText(t.text).width;
+      if (tw > maxW) {
+        size *= maxW / tw;
+        ctx.font = font(size);
+        tw = ctx.measureText(t.text).width;
+      }
+      const x = Math.min(Math.max(t.x, tw / 2 + 10), this.w - tw / 2 - 10);
+      ctx.lineWidth = Math.max(3, size * 0.16);
       ctx.strokeStyle = 'rgba(120,30,60,0.85)';
-      ctx.strokeText(t.text, t.x, t.y);
+      ctx.strokeText(t.text, x, t.y);
       ctx.fillStyle = t.color;
-      ctx.fillText(t.text, t.x, t.y);
+      ctx.fillText(t.text, x, t.y);
     }
     ctx.globalAlpha = 1;
   }

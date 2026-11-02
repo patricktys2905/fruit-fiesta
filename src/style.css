@@ -296,3 +296,35 @@ body.has-bg-title[data-screen="title"] #scenery > * { display: none; }
 .tilt-btn:active { transform: translateY(4px); box-shadow: 0 1px 0 #8fcf9a; }
 .tilt-btn.current { background: linear-gradient(#7be38a, #3fbf55); color: #fff; box-shadow: 0 5px 0 #23893a, 0 0 14px rgba(120, 255, 140, 0.7); }
 .tilt-bar.busy .tilt-btn { opacity: 0.6; }
+/* ---------- small-screen fit ---------- */
+.toast { white-space: normal; text-align: center; width: max-content; max-width: calc(100vw - 32px); line-height: 1.25; }
+.card h2, #modal-title { overflow-wrap: anywhere; }
+.modal { padding: 16px; }
+.modal-btns { flex-wrap: wrap; }
+.panel-sub, .lc-tip, .lc-lives { overflow-wrap: anywhere; }
+.quest-text { overflow-wrap: anywhere; }
+@media (max-width: 370px) {
+  .big-btn { font-size: 28px; padding: 10px 44px; }
+  .mid-btn { font-size: 16px; padding: 9px 14px; }
+  .card h2 { font-size: 28px; }
+  .level-card h2 { font-size: 26px; }
+  .modal-stars { font-size: 46px; }
+  .pill-btn { font-size: 14px; padding: 8px 12px; }
+  .lives-pill { font-size: 14px; padding: 5px 10px; }
+  .lives-timer { font-size: 11px; }
+  .world-name { font-size: 21px; }
+  .total-stars { font-size: 14px; padding: 6px 9px; }
+  .hud-panel { padding: 6px 8px; gap: 4px; }
+  #moves { font-size: 26px; }
+  #score { font-size: 18px; }
+  #level-name { font-size: 14px; }
+  .tilt-btn { width: 44px; height: 44px; font-size: 20px; }
+  .order { padding: 4px 5px; gap: 4px; }
+  .cust { width: 36px; }
+  .cust-img { width: 36px; height: 36px; }
+  .need img { width: 20px; height: 20px; }
+  .quest-icon, .award-icon, .chest-icon { font-size: 24px; width: 30px; }
+}.toast { pointer-events: none; }
+@media (max-width: 370px) {
+  .recipe { display: none; }
+}
