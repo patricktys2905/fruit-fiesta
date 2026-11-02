@@ -1,5 +1,5 @@
 import { Board, Cell, Gravity, LAVA } from './core/board';
-import { playMove, playTilt, MoveResult, Step, COCONUT_POINTS } from './core/engine';
+import { playMove, playTilt, playHammer, MoveResult, Step, COCONUT_POINTS } from './core/engine';
 import { LevelDef, createBoard, hasSand } from './core/levels';
 import { starsFor, LEFTOVER_MOVE_BONUS } from './core/scoring';
 import { Renderer } from './renderer';
@@ -57,7 +57,7 @@ export class Game {
     renderer.onFrame = (now) => this.tick(now);
   }
 
-  async start(level: LevelDef, seedOverride?: number): Promise<void> {
+  async start(level: LevelDef, seedOverride?: number, opts: { beeStart?: boolean } = {}): Promise<void> {
     const session = ++this.session;
     this.level = level;
     this.score = 0;
@@ -70,6 +70,12 @@ export class Game {
     this.report = emptyReport(level.id);
     this.movesMade = 0;
     this.board = createBoard(level, seedOverride ?? level.seed);
+    this.hammerArmed = false;
+    if (opts.beeStart) {
+      // Bee Start booster: two random fruit begin as Busy Bees.
+      const fruit = this.board.grid.flat().filter((t) => t && t.kind >= 0 && !t.special && !t.ice && !t.unripe);
+      for (let i = 0; i < 2 && fruit.length; i++) fruit.splice(Math.floor(Math.random() * fruit.length), 1)[0]!.special = 'bee';
+    }
     this.specs = goalSpecs(level);
     this.shownSand = this.board.sandLeft();
     this.shownIce = this.board.iceLeft();
@@ -116,6 +122,10 @@ export class Game {
     if (!this.active || this.busy) return;
     const cell = this.renderer.cellAt(e.clientX, e.clientY);
     if (!cell) return;
+    if (this.hammerArmed) {
+      void this.smash(cell);
+      return;
+    }
     this.idleSince = performance.now();
     this.renderer.hint = null;
     const sel = this.renderer.selected;
@@ -226,6 +236,59 @@ export class Game {
     await this.afterMove(result, session);
   }
 
+  // ---------- boosters ----------
+
+  private hammerArmed = false;
+  /** Asked when you run out of moves: resolve true to continue with +5 moves. */
+  onOutOfMoves?: () => Promise<boolean>;
+  /** Asked before a booster is spent: resolve true if the player has one to use. */
+  spendBooster?: (id: 'hammer' | 'shuffle') => boolean;
+
+  /** Get the hammer ready: the next tap on the board smashes that cell. */
+  armHammer(): boolean {
+    if (!this.active || this.busy) return false;
+    this.hammerArmed = !this.hammerArmed;
+    this.renderer.selected = null;
+    if (this.hammerArmed) this.renderer.banner('🔨 Tap something to smash!', '#ffe3a0');
+    return this.hammerArmed;
+  }
+
+  get hammerReady(): boolean {
+    return this.hammerArmed;
+  }
+
+  private async smash(cell: Cell): Promise<void> {
+    if (!this.spendBooster?.('hammer')) {
+      this.hammerArmed = false;
+      return;
+    }
+    this.hammerArmed = false;
+    const session = this.session;
+    this.busy = true;
+    this.renderer.hint = null;
+    sfx.boom();
+    const result = playHammer(this.board, cell, this.engineCtx());
+    await this.replay(result.steps, session);
+    if (session !== this.session) return;
+    this.busy = false;
+    this.idleSince = performance.now();
+    this.onBoosterUsed?.();
+    if (this.isWon() && this.specs.length > 0) return this.finish(true, session);
+  }
+
+  async useShuffle(): Promise<void> {
+    if (!this.active || this.busy || !this.spendBooster?.('shuffle')) return;
+    this.busy = true;
+    this.renderer.banner('🔀 Shuffle!', '#9ff');
+    sfx.shuffle();
+    this.board.shuffle();
+    await this.renderer.shuffleTo(this.board);
+    this.busy = false;
+    this.onBoosterUsed?.();
+  }
+
+  onBoosterUsed?: () => void;
+
   /** Fired when gravity changes (for the tilt buttons). */
   onTiltChange?: (g: Gravity) => void;
 
@@ -257,7 +320,12 @@ export class Game {
     }
 
     if (this.isWon() && this.specs.length > 0) return this.finish(true, session);
-    if (this.moves <= 0) return this.finish(this.isWon(), session);
+    if (this.moves <= 0 && !this.isWon() && this.onOutOfMoves && (await this.onOutOfMoves())) {
+      if (session !== this.session) return;
+      this.moves += 5;
+      this.renderer.banner('➕ 5 more moves!', '#c6ffb0');
+      this.updateHud();
+    } else if (this.moves <= 0) return this.finish(this.isWon(), session);
     this.busy = false;
     this.idleSince = performance.now();
   }

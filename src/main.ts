@@ -10,6 +10,7 @@ import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl, goldenIconUrl
 import { artReady, artUrl } from './art';
 import { setupPwa, toast } from './pwa';
 import { Meta } from './metaUi';
+import { BOOSTERS } from './meta/economy';
 import { loadProgress, saveProgress, isUnlocked } from './save';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -255,6 +256,11 @@ function openLevelCard(lvl: LevelDef) {
   if (lvl.coconuts) tips.push('Drop coconuts to the bottom to collect them');
   $('lc-tip').textContent = tips.join(' · ');
   $('lc-moves').textContent = String(lvl.moves);
+  const bees = meta.count('beeStart');
+  const beeBox = $<HTMLInputElement>('lc-bee');
+  beeBox.checked = false;
+  beeBox.disabled = bees <= 0;
+  $('lc-bee-n').textContent = bees > 0 ? `(you have ${bees})` : '(none left: get more in the Shop)';
   $('level-card').classList.remove('hidden');
 }
 const closeCard = () => $('level-card').classList.add('hidden');
@@ -264,11 +270,11 @@ $('level-card').onclick = (e) => {
 };
 $('lc-play').onclick = () => {
   closeCard();
-  startLevel(cardLevel);
+  startLevel(cardLevel, $<HTMLInputElement>('lc-bee').checked);
 };
 
 // ---------- game ----------
-function startLevel(level: LevelDef) {
+function startLevel(level: LevelDef, beeStart = false) {
   sfx.unlock();
   if (!meta.canStart()) {
     toast('💔 Out of lives! Check Daily Quests for more');
@@ -278,7 +284,9 @@ function startLevel(level: LevelDef) {
   current = level;
   $('tilt-bar').classList.toggle('hidden', !level.tilt);
   show('game');
-  requestAnimationFrame(() => void game.start(level));
+  const bees = beeStart && meta.useBooster('beeStart');
+  renderBoosters();
+  requestAnimationFrame(() => void game.start(level, undefined, { beeStart: bees }));
 }
 
 $('btn-back').onclick = () => {
@@ -331,7 +339,8 @@ function onLevelEnd(r: LevelResult) {
   $('modal-note').textContent = r.won
     ? r.score > prevBest ? 'New best score!' : `Best: ${prevBest.toLocaleString()}`
     : 'So close! You lost a life 💔';
-  meta.onLevelEnd(r.report);
+  const coins = meta.onLevelEnd(r.report, prevStars);
+  if (coins) $('modal-note').textContent += `  ·  🪙 +${coins}`;
   const next = LEVELS.find((l) => l.id === r.level.id + 1);
   $('btn-modal-next').classList.toggle('hidden', !r.won || !next);
   $('modal').classList.remove('hidden');
@@ -353,3 +362,50 @@ if (import.meta.env.DEV) (window as unknown as { __ff: unknown }).__ff = { game,
 const tiltBtns = [...document.querySelectorAll<HTMLButtonElement>('.tilt-btn')];
 game.onTiltChange = (g) => tiltBtns.forEach((b) => b.classList.toggle('current', b.dataset.dir === g));
 tiltBtns.forEach((b) => (b.onclick = () => void game.tilt(b.dataset.dir as 'down' | 'up' | 'left' | 'right')));
+// ---------- boosters ----------
+function renderBoosters() {
+  const h = meta.count('hammer'), s = meta.count('shuffle');
+  $('bst-hammer').querySelector('b')!.textContent = String(h);
+  $('bst-shuffle').querySelector('b')!.textContent = String(s);
+  $('bst-hammer').classList.toggle('empty', h <= 0);
+  $('bst-shuffle').classList.toggle('empty', s <= 0);
+  $('bst-hammer').classList.toggle('armed', game.hammerReady);
+}
+meta.onInventory = renderBoosters;
+game.spendBooster = (id) => meta.useBooster(id);
+game.onBoosterUsed = renderBoosters;
+renderBoosters();
+$('bst-hammer').onclick = () => {
+  if (meta.count('hammer') <= 0) {
+    toast('🔨 No hammers left: win levels for coins, then visit the Shop');
+    return;
+  }
+  game.armHammer();
+  renderBoosters();
+};
+$('bst-shuffle').onclick = () => {
+  if (meta.count('shuffle') <= 0) {
+    toast('🔀 No shuffles left: win levels for coins, then visit the Shop');
+    return;
+  }
+  void game.useShuffle();
+};
+
+// Out of moves: offer +5 moves from a booster (or coins), never real money.
+game.onOutOfMoves = () =>
+  new Promise<boolean>((resolve) => {
+    const have = meta.count('moves5');
+    const price = BOOSTERS.moves5.price;
+    if (have <= 0 && meta.coins < price) return resolve(false);
+    $('cont-text').textContent = have > 0 ? `Use a +5 Moves booster? (you have ${have})` : `Buy +5 moves for 🪙 ${price}? (you have 🪙 ${meta.coins})`;
+    $('cont-use').textContent = have > 0 ? '➕ Use one' : `🪙 ${price}`;
+    $('continue').classList.remove('hidden');
+    $('cont-use').onclick = () => {
+      $('continue').classList.add('hidden');
+      resolve(have > 0 ? meta.useBooster('moves5') : meta.buyAndUse('moves5'));
+    };
+    $('cont-quit').onclick = () => {
+      $('continue').classList.add('hidden');
+      resolve(false);
+    };
+  });

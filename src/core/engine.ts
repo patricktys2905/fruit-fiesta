@@ -650,6 +650,22 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
   });
 }
 
+/** Fruit Hammer booster: smash one cell (like a tiny blast), then let the board settle. Free: no move used. */
+export function playHammer(board: Board, cell: Cell, ctx: EngineCtx): MoveResult {
+  const result = emptyResult();
+  const t = board.get(cell.r, cell.c);
+  if (!t || !board.inBounds(cell)) return result;
+  result.valid = true;
+  return resolve(board, ctx, result, (sb) => {
+    sb.blasts.push({ type: 'bomb', origin: cell, cells: [cell], radius: 0 });
+    if (t.kind === COCONUT) {
+      sb.clear.set(cellKey(cell.r, cell.c), { r: cell.r, c: cell.c }); // the hammer can even knock a coconut away
+    } else sb.add(cell);
+    sb.run();
+    return false;
+  }, true);
+}
+
 /** Island Tilt: change which way gravity pulls; everything slides, then settles. Costs a move. */
 export function playTilt(board: Board, dir: Gravity, ctx: EngineCtx): MoveResult {
   const result = emptyResult();
@@ -665,7 +681,7 @@ function emptyResult(): MoveResult {
 }
 
 /** Shared end of every move: first clear (if any), cascades, ripening, tide, shuffle. */
-function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: StepBuilder) => boolean) | null): MoveResult {
+function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: StepBuilder) => boolean) | null, free = false): MoveResult {
   let chain = 1;
   let tidePushed = false;
   if (first) {
@@ -675,6 +691,14 @@ function resolve(board: Board, ctx: EngineCtx, result: MoveResult, first: ((sb: 
   } else chain = 0;
 
   cascade();
+  if (free) {
+    // Boosters don't use a move, so nothing ticks (belts, ripening, lava, tide, night).
+    if (!board.findHint()) {
+      board.shuffle();
+      result.steps.push({ type: 'shuffle' });
+    }
+    return result;
+  }
   // Conveyor belts slide their rows one step (which can line up new matches).
   const conv = conveyorShift(board);
   if (conv) {

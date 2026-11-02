@@ -9,6 +9,11 @@ import { LevelReport } from './meta/report';
 import { LEVELS, WORLDS } from './core/levels';
 import { Progress, isUnlocked } from './save';
 import { toast } from './pwa';
+import {
+  BOOSTERS, BoosterId, Inventory, Reward, emptyInventory, rewardText, winCoins, LIFE_PRICE,
+  SPIN_SLICES, spinResult, CALENDAR, CalendarState, freshCalendar, calendarReady, claimCalendar,
+  WeeklyState, weekKey, ensureWeek, applyWeekly, WEEKLY_QUEST_REWARD, WEEKLY_CHEST,
+} from './meta/economy';
 import { sfx } from './audio';
 
 interface MetaSave {
@@ -16,6 +21,11 @@ interface MetaSave {
   daily: DailyState | null;
   life: Lifetime;
   achievements: Record<string, number>;
+  coins: number;
+  inv: Inventory;
+  spinDate: string;
+  calendar: CalendarState;
+  weekly: WeeklyState | null;
 }
 
 const KEY = 'ff-meta-v1';
@@ -39,10 +49,17 @@ export class Meta {
       daily: loaded.daily ?? null,
       life: { ...freshLifetime(), ...(loaded.life ?? {}) },
       achievements: loaded.achievements ?? {},
+      coins: loaded.coins ?? 100,
+      inv: { ...emptyInventory(), ...(loaded.inv ?? {}) },
+      spinDate: loaded.spinDate ?? '',
+      calendar: loaded.calendar ?? freshCalendar(),
+      weekly: loaded.weekly ?? null,
     };
     this.rollDay();
     $('btn-daily').onclick = $('map-daily').onclick = () => this.openDaily();
     $('btn-awards').onclick = $('map-awards').onclick = () => this.openAwards();
+    $('btn-hub').onclick = $('map-hub').onclick = () => this.openHub();
+    $('panel-back').onclick = () => this.openHub();
     $('panel-close').onclick = () => $('panel').classList.add('hidden');
     $('panel').onclick = (e) => {
       if (e.target === $('panel')) $('panel').classList.add('hidden');
@@ -106,14 +123,72 @@ export class Meta {
   // ---------- results ----------
 
   /** Count a finished attempt. Returns nothing; shows toasts for quests and achievements. */
-  onLevelEnd(r: LevelReport): void {
+  onLevelEnd(r: LevelReport, prevStars = 0): number {
     if (!r.won) this.loseLife();
     addReport(this.s.life, r);
     const daily = this.rollDay();
     for (const q of applyReport(daily, r)) this.queueToast(`📅 Quest done: ${questText(q)}`);
+    const week = this.rollWeek();
+    for (const q of applyWeekly(week, r)) this.queueToast(`📆 Weekly quest done: ${questText(q)}`);
+    const coins = r.won ? winCoins(r.stars, prevStars) : 0;
+    this.s.coins += coins;
     this.checkAchievements();
     this.save();
     this.renderAll();
+    return coins;
+  }
+
+  // ---------- coins & boosters ----------
+
+  get coins(): number {
+    return this.s.coins;
+  }
+
+  count(id: BoosterId): number {
+    return this.s.inv[id] ?? 0;
+  }
+
+  /** Use one booster if you have it. */
+  useBooster(id: BoosterId): boolean {
+    if ((this.s.inv[id] ?? 0) <= 0) return false;
+    this.s.inv[id]--;
+    this.save();
+    this.renderAll();
+    return true;
+  }
+
+  /** Pay coins for a booster used straight away (for the +5 moves offer). */
+  buyAndUse(id: BoosterId): boolean {
+    if (this.s.coins < BOOSTERS[id].price) return false;
+    this.s.coins -= BOOSTERS[id].price;
+    this.save();
+    this.renderAll();
+    return true;
+  }
+
+  /** Booster counts changed (shop, rewards): listeners refresh their buttons. */
+  onInventory?: () => void;
+
+  grant(r: Reward, why: string): void {
+    const now = Date.now();
+    if (r.coins) this.s.coins += r.coins;
+    for (const [k, n] of Object.entries(r.boosters ?? {})) this.s.inv[k as BoosterId] = (this.s.inv[k as BoosterId] ?? 0) + (n ?? 0);
+    if (r.lives) this.s.lives = addLives(this.s.lives, r.lives, now);
+    if (r.unlimitedMin) this.s.lives = addUnlimited(this.s.lives, r.unlimitedMin * 60_000, now);
+    this.queueToast(`${why}: ${rewardText(r)}`);
+    sfx.star(2);
+    this.checkAchievements();
+    this.save();
+    this.renderAll();
+  }
+
+  private rollWeek(): WeeklyState {
+    const wk = weekKey(new Date());
+    if (this.s.weekly?.week !== wk) {
+      this.s.weekly = ensureWeek(this.s.weekly, wk, this.maxLevel());
+      this.save();
+    }
+    return this.s.weekly!;
   }
 
   private ctx(): AchieveCtx {
@@ -155,6 +230,8 @@ export class Meta {
 
   private renderAll(): void {
     this.renderLives();
+    this.renderHub();
+    this.onInventory?.();
     const d = this.rollDay();
     const done = d.quests.filter(questDone).length;
     const claimable = d.quests.filter((q) => questDone(q) && !q.claimed).length + (d.quests.every((q) => q.claimed) && !d.chestClaimed ? 1 : 0);
@@ -170,6 +247,7 @@ export class Meta {
     sfx.select();
     const d = this.rollDay();
     $('panel-title').textContent = '📅 Daily Quests';
+    $('panel-back').classList.remove('hidden');
     $('panel-sub').innerHTML = `New quests every day · 🔥 Streak: <b>${d.streak} day${d.streak === 1 ? '' : 's'}</b>`;
     const body = $('panel-body');
     body.innerHTML = '';
@@ -188,6 +266,7 @@ export class Meta {
       row.querySelector<HTMLButtonElement>('.claim-btn')?.addEventListener('click', () => {
         q.claimed = true;
         this.s.lives = addLives(this.s.lives, 1, Date.now());
+        this.s.coins += 25;
         this.s.life.questsDone++;
         sfx.star(1);
         this.checkAchievements();
@@ -207,6 +286,8 @@ export class Meta {
     chest.querySelector<HTMLButtonElement>('.claim-btn')?.addEventListener('click', () => {
       d.chestClaimed = true;
       this.s.lives = addUnlimited(this.s.lives, CHEST_MS, Date.now());
+      this.s.coins += 100;
+      this.s.inv.beeStart++;
       sfx.win();
       toast('🎁 Unlimited lives for 1 hour!');
       this.save();
@@ -222,6 +303,7 @@ export class Meta {
     const ctx = this.ctx();
     const have = this.s.achievements;
     $('panel-title').textContent = '🏆 Awards';
+    $('panel-back').classList.remove('hidden');
     $('panel-sub').innerHTML = `<b>${Object.keys(have).length}</b> of ${ACHIEVEMENTS.length} earned`;
     const body = $('panel-body');
     body.innerHTML = '';
@@ -242,5 +324,201 @@ export class Meta {
       body.appendChild(row);
     }
     $('panel').classList.remove('hidden');
+  }
+
+  // ---------- Fiesta Hub ----------
+
+  private claimables(): { calendar: boolean; spin: boolean; daily: number; weekly: number } {
+    const today = dateKey(new Date());
+    const d = this.rollDay();
+    const w = this.rollWeek();
+    return {
+      calendar: calendarReady(this.s.calendar, today),
+      spin: this.s.spinDate !== today,
+      daily: d.quests.filter((q) => questDone(q) && !q.claimed).length + (d.quests.every((q) => q.claimed) && !d.chestClaimed ? 1 : 0),
+      weekly: w.quests.filter((q, i) => questDone(q) && !w.claimed[i]).length + (w.claimed.every(Boolean) && !w.chestClaimed ? 1 : 0),
+    };
+  }
+
+  private renderHub(): void {
+    const c = this.claimables();
+    const n = (c.calendar ? 1 : 0) + (c.spin ? 1 : 0) + c.daily + c.weekly;
+    for (const id of ['hub-badge', 'map-hub-badge']) {
+      const b = document.getElementById(id);
+      if (!b) continue;
+      b.textContent = n ? String(n) : '';
+      b.classList.toggle('hidden', !n);
+    }
+    document.getElementById('map-hub')?.classList.toggle('glow', n > 0);
+    for (const id of ['title-coins', 'map-coins']) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<b class="coin">🪙</b><b>${this.s.coins.toLocaleString()}</b>`;
+    }
+  }
+
+  private panel(title: string, sub: string): HTMLElement {
+    $('panel-title').textContent = title;
+    $('panel-sub').innerHTML = sub;
+    $('panel-back').classList.toggle('hidden', title.includes('Hub'));
+    const body = $('panel-body');
+    body.innerHTML = '';
+    $('panel').classList.remove('hidden');
+    return body;
+  }
+
+  openHub(): void {
+    sfx.select();
+    const c = this.claimables();
+    const body = this.panel('🎪 Fiesta Hub', `🪙 <b>${this.s.coins.toLocaleString()}</b> coins`);
+    const tiles: { icon: string; name: string; note: string; ready: boolean; open: () => void }[] = [
+      { icon: '🎁', name: 'Gift Calendar', note: c.calendar ? "Today's gift is ready!" : `Day ${this.s.calendar.day + 1} of 7 tomorrow`, ready: c.calendar, open: () => this.openCalendar() },
+      { icon: '🎡', name: 'Daily Spin', note: c.spin ? 'Free spin ready!' : 'Come back tomorrow', ready: c.spin, open: () => this.openSpin() },
+      { icon: '📅', name: 'Daily Quests', note: c.daily ? `${c.daily} reward${c.daily > 1 ? 's' : ''} to claim` : '3 new quests every day', ready: c.daily > 0, open: () => this.openDaily() },
+      { icon: '📆', name: 'Fiesta Week', note: c.weekly ? `${c.weekly} reward${c.weekly > 1 ? 's' : ''} to claim` : '5 big quests this week', ready: c.weekly > 0, open: () => this.openWeekly() },
+      { icon: '🛒', name: 'Shop', note: 'Boosters and lives for coins', ready: false, open: () => this.openShop() },
+      { icon: '🏆', name: 'Awards', note: `${Object.keys(this.s.achievements).length} of ${ACHIEVEMENTS.length} earned`, ready: false, open: () => this.openAwards() },
+    ];
+    const grid = document.createElement('div');
+    grid.className = 'hub-grid';
+    for (const t of tiles) {
+      const b = document.createElement('button');
+      b.className = 'hub-tile' + (t.ready ? ' ready' : '');
+      b.innerHTML = `<span class="hub-icon">${t.icon}</span><b>${t.name}</b><small>${t.note}</small>`;
+      b.onclick = t.open;
+      grid.appendChild(b);
+    }
+    body.appendChild(grid);
+    const inv = document.createElement('div');
+    inv.className = 'inv-row';
+    inv.innerHTML = (Object.keys(BOOSTERS) as BoosterId[]).map((k) => `<span class="inv-item" title="${BOOSTERS[k].name}">${BOOSTERS[k].icon}<b>${this.count(k)}</b></span>`).join('');
+    body.appendChild(inv);
+  }
+
+  openShop(): void {
+    sfx.select();
+    const body = this.panel('🛒 Shop', `You have 🪙 <b>${this.s.coins.toLocaleString()}</b>. Earn coins by winning levels and finishing quests.`);
+    const items: { icon: string; name: string; desc: string; price: number; have: string; buy: () => void }[] = [
+      ...(Object.keys(BOOSTERS) as BoosterId[]).map((k) => ({
+        icon: BOOSTERS[k].icon, name: BOOSTERS[k].name, desc: BOOSTERS[k].desc, price: BOOSTERS[k].price, have: `You have ${this.count(k)}`,
+        buy: () => { this.s.inv[k]++; },
+      })),
+      { icon: '❤️', name: '1 Life', desc: 'Jump back in straight away.', price: LIFE_PRICE, have: '', buy: () => { this.s.lives = addLives(this.s.lives, 1, Date.now()); } },
+    ];
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      const can = this.s.coins >= it.price;
+      row.innerHTML = `<span class="quest-icon">${it.icon}</span><div class="quest-main"><span class="quest-text">${it.name}</span><small>${it.desc}</small>${it.have ? `<small class="have">${it.have}</small>` : ''}</div><button class="claim-btn buy"${can ? '' : ' disabled'}>🪙 ${it.price}</button>`;
+      row.querySelector('button')!.addEventListener('click', () => {
+        if (this.s.coins < it.price) return;
+        this.s.coins -= it.price;
+        it.buy();
+        sfx.create();
+        this.save();
+        this.renderAll();
+        this.openShop();
+      });
+      body.appendChild(row);
+    }
+  }
+
+  openSpin(): void {
+    sfx.select();
+    const today = dateKey(new Date());
+    const ready = this.s.spinDate !== today;
+    const body = this.panel('🎡 Daily Spin', ready ? 'One free spin every day!' : 'You already spun today. Come back tomorrow!');
+    const n = SPIN_SLICES.length;
+    const stops = SPIN_SLICES.map((s, i) => `${s.color} ${(i * 360) / n}deg ${((i + 1) * 360) / n}deg`).join(', ');
+    const wrap = document.createElement('div');
+    wrap.className = 'spin-wrap';
+    wrap.innerHTML = `<div class="spin-pointer">▼</div><div class="spin-wheel" style="background: conic-gradient(${stops})">${SPIN_SLICES.map((s, i) => `<span class="spin-label" style="transform: rotate(${(i + 0.5) * (360 / n)}deg)">${rewardText(s.reward).replace(/\s+/g, ' ')}</span>`).join('')}<div class="spin-hub">🍓</div></div>`;
+    body.appendChild(wrap);
+    const btn = document.createElement('button');
+    btn.className = 'big-btn spin-btn';
+    btn.textContent = ready ? 'Spin!' : 'Spun ✓';
+    btn.disabled = !ready;
+    btn.onclick = () => {
+      if (this.s.spinDate === today) return;
+      btn.disabled = true;
+      const idx = spinResult(today, this.s.calendar.total);
+      const wheel = wrap.querySelector<HTMLElement>('.spin-wheel')!;
+      const target = 360 * 5 + (360 - (idx + 0.5) * (360 / n));
+      wheel.style.transition = 'transform 3.2s cubic-bezier(0.15, 0.85, 0.2, 1)';
+      wheel.style.transform = `rotate(${target}deg)`;
+      sfx.buzz();
+      setTimeout(() => {
+        this.s.spinDate = today;
+        this.grant(SPIN_SLICES[idx].reward, '🎡 You won');
+        sfx.win();
+        btn.textContent = `🎉 ${rewardText(SPIN_SLICES[idx].reward)}`;
+      }, 3300);
+    };
+    body.appendChild(btn);
+  }
+
+  openCalendar(): void {
+    sfx.select();
+    const today = dateKey(new Date());
+    const cal = this.s.calendar;
+    const ready = calendarReady(cal, today);
+    const body = this.panel('🎁 Gift Calendar', 'A gift for every day you play. Missed a day? No problem, you just pick up where you left off.');
+    const grid = document.createElement('div');
+    grid.className = 'cal-grid';
+    CALENDAR.forEach((r, i) => {
+      const state = i < cal.day ? 'got' : i === cal.day && ready ? 'today' : 'later';
+      const d = document.createElement('div');
+      d.className = `cal-day ${i === 6 ? 'big ' : ''}${state}`;
+      d.innerHTML = `<small>Day ${i + 1}</small><span>${state === 'got' ? '✅' : i === 6 ? '🧰' : '🎁'}</span><b>${rewardText(r)}</b>`;
+      grid.appendChild(d);
+    });
+    body.appendChild(grid);
+    const btn = document.createElement('button');
+    btn.className = 'big-btn spin-btn';
+    btn.textContent = ready ? `Claim Day ${cal.day + 1}!` : 'Claimed today ✓';
+    btn.disabled = !ready;
+    btn.onclick = () => {
+      const r = claimCalendar(cal, today);
+      if (!r) return;
+      this.grant(r, '🎁 Daily gift');
+      this.openCalendar();
+    };
+    body.appendChild(btn);
+  }
+
+  openWeekly(): void {
+    sfx.select();
+    const w = this.rollWeek();
+    const body = this.panel('📆 Fiesta Week', `5 big quests, all week long · resets Monday`);
+    w.quests.forEach((q, i) => {
+      const t = templateOf(q);
+      const pct = Math.round((q.progress / q.target) * 100);
+      const row = document.createElement('div');
+      row.className = 'quest' + (questDone(q) ? ' done' : '');
+      row.innerHTML = `
+        <span class="quest-icon">${t.icon}</span>
+        <div class="quest-main">
+          <span class="quest-text">${questText(q)}</span>
+          <div class="progress"><div style="width:${pct}%"></div><span>${Math.min(q.progress, q.target).toLocaleString()} / ${q.target.toLocaleString()}</span></div>
+        </div>
+        ${w.claimed[i] ? '<span class="quest-claimed">✓</span>' : questDone(q) ? `<button class="claim-btn">${rewardText(WEEKLY_QUEST_REWARD)}</button>` : `<span class="quest-reward">${rewardText(WEEKLY_QUEST_REWARD)}</span>`}`;
+      row.querySelector<HTMLButtonElement>('.claim-btn')?.addEventListener('click', () => {
+        w.claimed[i] = true;
+        this.s.life.questsDone++;
+        this.grant(WEEKLY_QUEST_REWARD, '📆 Weekly reward');
+        this.openWeekly();
+      });
+      body.appendChild(row);
+    });
+    const all = w.claimed.every(Boolean);
+    const chest = document.createElement('div');
+    chest.className = 'chest' + (all && !w.chestClaimed ? ' ready' : '') + (w.chestClaimed ? ' opened' : '');
+    chest.innerHTML = `<span class="chest-icon">${w.chestClaimed ? '🎁' : '🏆'}</span><div class="quest-main"><span class="quest-text">Grand Weekly Chest</span><small>${w.chestClaimed ? 'Opened! New quests on Monday.' : rewardText(WEEKLY_CHEST)}</small></div>${all && !w.chestClaimed ? '<button class="claim-btn">Open!</button>' : ''}`;
+    chest.querySelector<HTMLButtonElement>('.claim-btn')?.addEventListener('click', () => {
+      w.chestClaimed = true;
+      this.grant(WEEKLY_CHEST, '🏆 Weekly chest');
+      sfx.win();
+      this.openWeekly();
+    });
+    body.appendChild(chest);
   }
 }

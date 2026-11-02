@@ -49,6 +49,10 @@
       </header>
       <section id="cafe" class="cafe hidden" aria-label="Café orders"></section>
       <main id="board-wrap"><canvas id="board"></canvas></main>
+      <div id="booster-bar" class="booster-bar">
+        <button id="bst-hammer" class="bst-btn" aria-label="Fruit Hammer">🔨<b></b></button>
+        <button id="bst-shuffle" class="bst-btn" aria-label="Shuffle">🔀<b></b></button>
+      </div>
       <div id="tilt-bar" class="tilt-bar hidden" aria-label="Tilt the island">
         <span class="tilt-label">Tilt</span>
         <button class="tilt-btn" data-dir="left" aria-label="Tilt left">⬅</button>
@@ -61,7 +65,7 @@
 
     <!-- Title screen -->
     <section id="screen-title" class="screen">
-      <div class="title-top"><span id="title-lives" class="lives-pill"></span></div>
+      <div class="title-top"><span id="title-lives" class="lives-pill"></span><span id="title-coins" class="lives-pill coins-pill"></span></div>
       <div class="logo" id="logo">
         <span class="logo-fruit">Fruit</span>
         <span class="logo-fiesta">Fiesta!</span>
@@ -69,8 +73,9 @@
       <div id="title-fruits" class="title-fruits"></div>
       <button id="btn-play" class="big-btn">Play</button>
       <div class="title-row">
-        <button id="btn-daily" class="pill-btn">📅 Daily Quests <span id="daily-badge" class="badge hidden"></span></button>
-        <button id="btn-awards" class="pill-btn">🏆 Awards</button>
+        <button id="btn-hub" class="pill-btn hub-btn">🎪 Fiesta Hub <span id="hub-badge" class="badge hidden"></span></button>
+        <button id="btn-daily" class="pill-btn">📅 Daily <span id="daily-badge" class="badge hidden"></span></button>
+        <button id="btn-awards" class="pill-btn">🏆</button>
       </div>
       <p class="tagline">Match, splash &amp; party with the family</p>
       <button id="btn-install" class="install-btn hidden">📲 Install app</button>
@@ -83,9 +88,22 @@
     <div id="panel" class="modal hidden" role="dialog" aria-modal="true">
       <div class="card panel-card">
         <button id="panel-close" class="lc-close" aria-label="Close">×</button>
+        <button id="panel-back" class="lc-close panel-back hidden" aria-label="Back to Fiesta Hub">‹</button>
         <h2 id="panel-title"></h2>
         <p id="panel-sub" class="panel-sub"></p>
         <div id="panel-body" class="panel-body"></div>
+      </div>
+    </div>
+
+    <!-- Out of moves: continue? -->
+    <div id="continue" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Out of moves!</h2>
+        <p class="confirm-text" id="cont-text"></p>
+        <div class="modal-btns">
+          <button id="cont-quit" class="mid-btn ghost">Give up</button>
+          <button id="cont-use" class="mid-btn">➕ 5 moves</button>
+        </div>
       </div>
     </div>
 
@@ -110,8 +128,10 @@
       </div>
       <div class="meta-bar">
         <span id="map-lives" class="lives-pill"></span>
-        <button id="map-daily" class="pill-btn small">📅 <span id="map-daily-count"></span></button>
-        <button id="map-awards" class="pill-btn small">🏆 <span id="map-awards-count"></span></button>
+        <span id="map-coins" class="lives-pill coins-pill"></span>
+        <button id="map-hub" class="pill-btn small">🎪 <span id="map-hub-badge" class="badge hidden"></span></button>
+        <button id="map-daily" class="pill-btn small hidden">📅 <span id="map-daily-count"></span></button>
+        <button id="map-awards" class="pill-btn small hidden">🏆 <span id="map-awards-count"></span></button>
       </div>
       <div class="map-scroll" id="map-scroll">
         <div class="map-wrap">
@@ -142,6 +162,7 @@
           <span class="lc-moves"><b id="lc-moves"></b> moves</span>
           <span id="lc-tip" class="lc-tip"></span>
         </div>
+        <label class="lc-boost" id="lc-boost"><input type="checkbox" id="lc-bee" /> 🐝 Bee Start <small id="lc-bee-n"></small></label>
         <button id="lc-play" class="big-btn lc-play">Play</button>
         <p id="lc-lives" class="lc-lives"></p>
       </div>
