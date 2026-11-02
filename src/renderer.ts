@@ -1,6 +1,6 @@
-import { Board, Cell, FallMove, Spawn, Special, Tile, cellKey } from './core/board';
-import { ClearStep, Cleared, CollectStep, COCONUT_POINTS } from './core/engine';
-import { FRUITS, makeBeeSprite, makeFruitSprite, makeSandSprite } from './fruitArt';
+import { Board, Cell, FallMove, MUSH, Spawn, Special, Tile, cellKey } from './core/board';
+import { ClearStep, Cleared, CollectStep, RipenStep, COCONUT_POINTS } from './core/engine';
+import { FRUITS, makeBeeSprite, makeFruitSprite, makeSandSprite, makeMushSprite, tintSprite } from './fruitArt';
 import { Tweener, easeOutQuad, easeInBack, easeOutBack, fallEase, wait } from './tween';
 import { sfx } from './audio';
 
@@ -11,6 +11,8 @@ interface Vis {
   alpha: number;
   kind: number;
   special?: Special;
+  unripe?: number;
+  golden?: boolean;
 }
 
 type PType = 'drop' | 'seed' | 'spark' | 'bubble' | 'wedge' | 'leaf' | 'glint';
@@ -93,7 +95,7 @@ export class Renderer {
       for (let c = 0; c < board.cols; c++) {
         const t = board.grid[r][c];
         if (!t) continue;
-        const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special };
+        const v: Vis = { x: c, y: r - board.rows - 1, scale: 1, alpha: 1, kind: t.kind, special: t.special, unripe: t.unripe, golden: t.golden };
         this.vis.set(t.id, v);
         intro.push(this.tweens.to(v, { y: r }, 420 + r * 25, fallEase, (board.rows - r) * 30 + c * 12));
       }
@@ -104,6 +106,7 @@ export class Renderer {
   /** Rebuild sprites (call after new art loads). */
   refreshSprites(): void {
     this.sprites.clear();
+    this.tinted.clear();
     this.beeSprite = null;
     this.sandSprites = [];
   }
@@ -154,10 +157,55 @@ export class Renderer {
   private sprite(kind: number): HTMLCanvasElement {
     let s = this.sprites.get(kind);
     if (!s) {
-      s = makeFruitSprite(kind, this.tile * this.dpr * 0.92);
+      const px = this.tile * this.dpr * 0.92;
+      s = kind === MUSH ? makeMushSprite(px) : makeFruitSprite(kind, px);
       this.sprites.set(kind, s);
     }
     return s;
+  }
+
+  private tinted = new Map<string, HTMLCanvasElement>();
+  private variant(kind: number, mode: 'unripe' | 'golden'): HTMLCanvasElement {
+    const key = `${kind}:${mode}:${this.tile}`;
+    let s = this.tinted.get(key);
+    if (!s) {
+      s = tintSprite(this.sprite(kind), mode);
+      this.tinted.set(key, s);
+    }
+    return s;
+  }
+
+  /** End-of-move ripening: countdowns tick, ripe fruit turns golden, old golden fruit spoils. */
+  async playRipen(step: RipenStep): Promise<void> {
+    for (const t of step.ticked) {
+      const v = this.vis.get(t.id);
+      if (v) v.unripe = t.unripe;
+    }
+    const anims: Promise<void>[] = [];
+    for (const t of step.ripened) {
+      const v = this.vis.get(t.id);
+      if (!v) continue;
+      v.unripe = undefined;
+      v.golden = true;
+      const x = this.px(v.x), y = this.py(v.y);
+      this.sparkle(x, y, '#ffe14d', 9);
+      this.fx.push({ kind: 'ring', t: 0, dur: 420, x, y, r: this.tile * 0.8, color: '#ffd84a', width: this.tile * 0.1 });
+      anims.push(this.tweens.to(v, { scale: 1.3 }, 120, easeOutQuad).then(() => this.tweens.to(v, { scale: 1 }, 220, easeOutBack)));
+    }
+    for (const t of step.spoiled) {
+      const v = this.vis.get(t.id);
+      if (!v) continue;
+      v.golden = false;
+      v.special = undefined;
+      v.kind = MUSH;
+      const x = this.px(v.x), y = this.py(v.y);
+      this.fx.push({ kind: 'splat', t: 0, dur: 900, x, y, r: this.tile * 0.45, color: '#7a6236', seed: Math.random() * 100 });
+      this.emit('drop', x, y, '#8a7040', 6, { speed: 0.15 });
+      anims.push(this.tweens.to(v, { scale: 0.75 }, 120).then(() => this.tweens.to(v, { scale: 1 }, 260, easeOutBack)));
+    }
+    if (step.ripened.length) sfx.create();
+    if (step.spoiled.length) sfx.invalid();
+    await Promise.all(anims);
   }
 
   private bee(): HTMLCanvasElement {
@@ -197,7 +245,7 @@ export class Renderer {
       if (v) anims.push(this.tweens.to(v, { y: f.toR }, dur(f.toR - v.y), fallEase));
     }
     for (const s of spawns) {
-      const v: Vis = { x: s.c, y: s.dropFrom, scale: 1, alpha: 1, kind: s.tile.kind, special: s.tile.special };
+      const v: Vis = { x: s.c, y: s.dropFrom, scale: 1, alpha: 1, kind: s.tile.kind, special: s.tile.special, unripe: s.unripe };
       this.vis.set(s.tile.id, v);
       anims.push(this.tweens.to(v, { y: s.r }, dur(s.r - s.dropFrom), fallEase));
     }
@@ -673,7 +721,46 @@ export class Renderer {
 
     const pulse = v.special && v.special !== 'rainbow' ? 1 + 0.04 * Math.sin(now / 160) : 1;
     const s = size * pulse;
-    ctx.drawImage(this.sprite(v.kind), x - s / 2, y - s / 2, s, s);
+    if (v.golden) {
+      // golden glow behind ripe fruit
+      const g = ctx.createRadialGradient(x, y, size * 0.1, x, y, size * 0.62);
+      g.addColorStop(0, 'rgba(255,236,120,0.75)');
+      g.addColorStop(1, 'rgba(255,200,40,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, size * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const img = v.kind >= 0 && v.unripe ? this.variant(v.kind, 'unripe') : v.kind >= 0 && v.golden ? this.variant(v.kind, 'golden') : this.sprite(v.kind);
+    ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
+    if (v.golden) {
+      const a = now / 300 + v.x * 1.7 + v.y;
+      const sx = x + Math.cos(a) * size * 0.32, sy = y + Math.sin(a) * size * 0.32;
+      ctx.fillStyle = '#fffbe0';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const rr = i % 2 ? size * 0.025 : size * 0.09;
+        const aa = (i / 8) * Math.PI * 2;
+        ctx.lineTo(sx + Math.cos(aa) * rr, sy + Math.sin(aa) * rr);
+      }
+      ctx.fill();
+    }
+    if (v.kind >= 0 && v.unripe) {
+      // countdown badge
+      const bx = x + size * 0.3, by = y + size * 0.3, br = size * 0.17;
+      ctx.fillStyle = '#3c8f2a';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = Math.max(1.5, size * 0.04);
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = `900 ${Math.round(br * 1.3)}px "Baloo 2", "Trebuchet MS", system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(v.unripe), bx, by + br * 0.06);
+    }
 
     if (v.special === 'jetH' || v.special === 'jetV') {
       ctx.save();

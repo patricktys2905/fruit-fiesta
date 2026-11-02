@@ -6,6 +6,7 @@ import { playMove, ClearStep } from '../src/core/engine';
 import { LEVELS, LevelDef, createBoard, hasSand } from '../src/core/levels';
 import { mulberry32 } from '../src/core/rng';
 import { starsFor, LEFTOVER_MOVE_BONUS } from '../src/core/scoring';
+import { Cafe } from '../src/core/orders';
 
 function cloneBoard(b: Board, seed: number): Board {
   const c = new Board(b.cols, b.rows, b.kinds, mulberry32(seed));
@@ -14,6 +15,8 @@ function cloneBoard(b: Board, seed: number): Board {
   c.sand = b.sand.map((row) => [...row]);
   c.coconutsToSpawn = b.coconutsToSpawn;
   c.maxCoconuts = b.maxCoconuts;
+  c.unripeChance = b.unripeChance;
+  c.ripenTurns = b.ripenTurns;
   return c;
 }
 
@@ -23,14 +26,18 @@ function play(level: LevelDef, seed: number, smart: boolean) {
   let score = 0;
   const collected = Array(6).fill(0);
   let coconuts = 0;
+  let golden = 0;
   let moves = level.moves;
-  const wanted = () => level.collect.filter((g) => collected[g.kind] < g.count).map((g) => g.kind);
+  const cafe = level.cafe ? new Cafe(level.cafe, level.kinds, level.seed + seed) : null;
+  const wanted = () => (cafe ? cafe.wanted() : level.collect.filter((g) => collected[g.kind] < g.count).map((g) => g.kind));
   const needSand = hasSand(level);
   const goalsDone = () =>
     level.collect.every((g) => collected[g.kind] >= g.count) &&
     (!needSand || board.sandLeft() === 0) &&
-    coconuts >= (level.coconuts ?? 0);
-  const hasGoals = level.collect.length > 0 || needSand || !!level.coconuts;
+    coconuts >= (level.coconuts ?? 0) &&
+    golden >= (level.golden ?? 0) &&
+    (!cafe || cafe.done);
+  const hasGoals = level.collect.length > 0 || needSand || !!level.coconuts || !!cafe || !!level.golden;
   let specialsMade = 0;
 
   while (moves > 0) {
@@ -52,6 +59,16 @@ function play(level: LevelDef, seed: number, smart: boolean) {
     moves--;
     score += res.score;
     coconuts += res.coconuts;
+    for (const st of res.steps) {
+      if (st.type !== 'clear') continue;
+      golden += st.cleared.filter((c) => c.golden).length;
+      cafe?.feed(st.cleared);
+    }
+    if (cafe) {
+      const before = cafe.tips;
+      cafe.tick();
+      score += cafe.tips - before;
+    }
     res.collected.forEach((n, k) => (collected[k] += n));
     specialsMade += res.steps.filter((s): s is ClearStep => s.type === 'clear').reduce((n, s) => n + s.created.length, 0);
     if (hasGoals && goalsDone() && score >= level.stars[0]) break;

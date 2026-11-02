@@ -51,7 +51,7 @@ describe('daily quests', () => {
 
   it('tracks progress, keeps the streak across consecutive days, resets after a gap', () => {
     let s = ensureToday(null, '2026-11-02', 24);
-    const big = { ...emptyReport(1), won: true, stars: 3, score: 99999, jets: 9, bees: 9, bursts: 9, combos: 9, fruit: 999, fruitByKind: [999, 999, 999, 999, 999, 999], sand: 99, coconuts: 9 };
+    const big = { ...emptyReport(1), won: true, stars: 3, score: 99999, jets: 9, bees: 9, bursts: 9, combos: 9, fruit: 999, fruitByKind: [999, 999, 999, 999, 999, 999], sand: 99, coconuts: 9, golden: 99, customers: 99 };
     const done = applyReport(s, big);
     expect(done.length).toBeGreaterThan(0);
     // "win N levels" needs several wins

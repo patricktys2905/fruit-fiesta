@@ -1,5 +1,6 @@
 import { Board, COCONUT } from './board';
 import { mulberry32 } from './rng';
+import { CafeDef } from './orders';
 
 export interface CollectGoal {
   kind: number;
@@ -25,6 +26,12 @@ export interface LevelDef {
   coconuts?: number;
   /** Max coconuts on the board at once (default 1). */
   maxCoconuts?: number;
+  /** Beach Café: serve customers' smoothie orders. */
+  cafe?: CafeDef;
+  /** Ripening: chance new fruit arrives green, and moves to ripen. */
+  ripen?: { chance: number; turns?: number };
+  /** Goal: pop this many golden (ripe) fruit. */
+  golden?: number;
 }
 
 export interface WorldDef {
@@ -49,6 +56,11 @@ export function createBoard(level: LevelDef, seed = level.seed): Board {
   const placed = b.grid.flat().filter((t) => t?.kind === COCONUT).length;
   b.coconutsToSpawn = Math.max(0, (level.coconuts ?? 0) - placed);
   b.maxCoconuts = level.maxCoconuts ?? 1;
+  if (level.ripen) {
+    b.unripeChance = level.ripen.chance;
+    b.ripenTurns = level.ripen.turns ?? 3;
+    b.seedUnripe();
+  }
   return b;
 }
 
@@ -63,15 +75,15 @@ const L = (d: Def): LevelDef => ({
 // Fruit kinds: 0 Strawberry, 1 Orange, 2 Lemon, 3 Kiwi, 4 Grape, 5 Blueberry
 
 const SUNNY_ISLE: LevelDef[] = [
-  L({ id: 1, name: 'Sunny Start', kinds: 5, moves: 15, stars: [4000, 9000, 18000], collect: [] }),
-  L({ id: 2, name: 'Berry Picking', kinds: 5, moves: 20, stars: [1500, 9000, 14000], collect: [{ kind: 0, count: 35 }] }),
-  L({ id: 3, name: 'Citrus Grove', kinds: 5, moves: 20, stars: [1500, 9500, 15000], collect: [{ kind: 1, count: 35 }, { kind: 2, count: 35 }] }),
-  L({ id: 4, name: 'Kiwi Cove', kinds: 5, moves: 20, stars: [1500, 9500, 16000], collect: [{ kind: 3, count: 40 }] }),
-  L({ id: 5, name: 'Grape Escape', kinds: 6, moves: 22, stars: [3500, 7000, 12000], collect: [] }),
-  L({ id: 6, name: 'Blue Lagoon', kinds: 6, moves: 24, stars: [1500, 7500, 11000], collect: [{ kind: 5, count: 28 }, { kind: 4, count: 28 }] }),
-  L({ id: 7, name: 'Fruit Salad', kinds: 5, moves: 24, stars: [1500, 9000, 14000], collect: [{ kind: 0, count: 25 }, { kind: 3, count: 25 }, { kind: 4, count: 25 }] }),
+  L({ id: 1, name: 'Café Opening', kinds: 5, moves: 18, stars: [1500, 6000, 9500], collect: [], cafe: { serve: 3, slots: 1, patience: 12, size: [6, 8] } }),
+  L({ id: 2, name: 'Berry Rush', kinds: 5, moves: 20, stars: [1500, 9000, 14000], collect: [], cafe: { serve: 4, slots: 1, patience: 9, size: [8, 10] } }),
+  L({ id: 3, name: 'Two at a Time', kinds: 5, moves: 20, stars: [1500, 7000, 10500], collect: [], cafe: { serve: 5, slots: 2, patience: 8, size: [7, 9] } }),
+  L({ id: 4, name: 'Ripe & Ready', kinds: 5, moves: 18, stars: [1500, 8500, 11500], collect: [], golden: 18, ripen: { chance: 0.2 } }),
+  L({ id: 5, name: 'Golden Hour', kinds: 5, moves: 20, stars: [1500, 8000, 10500], collect: [], cafe: { serve: 5, slots: 2, patience: 8, size: [8, 10] }, ripen: { chance: 0.15 } }),
+  L({ id: 6, name: 'Rush Hour', kinds: 6, moves: 22, stars: [1500, 5000, 7000], collect: [], cafe: { serve: 6, slots: 3, patience: 8, size: [5, 7] } }),
+  L({ id: 7, name: 'Mushy Mess', kinds: 5, moves: 22, stars: [1500, 8500, 10500], collect: [], golden: 20, cafe: { serve: 4, slots: 2, patience: 11, size: [7, 9] }, ripen: { chance: 0.25 } }),
   L({
-    id: 8, name: 'Heart Beach', kinds: 5, moves: 22, stars: [5000, 9000, 14000], collect: [],
+    id: 8, name: 'Heart Beach', kinds: 5, moves: 24, stars: [1500, 7500, 10000], collect: [], cafe: { serve: 7, slots: 2, patience: 9, size: [7, 9] }, ripen: { chance: 0.12 },
     layout: [
       ' ..  .. ',
       '........',
@@ -84,7 +96,6 @@ const SUNNY_ISLE: LevelDef[] = [
     ],
   }),
 ];
-
 const COCONUT_COVE: LevelDef[] = [
   L({
     id: 9, name: 'Sandy Toes', kinds: 5, moves: 20, stars: [2000, 13000, 18000], collect: [],
@@ -320,7 +331,7 @@ const ZIGZAG: [number, number][] = [
 ];
 
 export const WORLDS: WorldDef[] = [
-  { id: 1, name: 'Sunny Isle', blurb: 'Where every fiesta begins', map: 'bg-map', spots: ZIGZAG, levels: SUNNY_ISLE },
+  { id: 1, name: 'Sunny Isle', blurb: 'Open your beach café!', map: 'bg-map', spots: ZIGZAG, levels: SUNNY_ISLE },
   { id: 2, name: 'Coconut Cove', blurb: 'Wash away the sand, catch the coconuts', map: 'bg-map-2', spots: ZIGZAG, levels: COCONUT_COVE },
   { id: 3, name: 'Berry Mountain', blurb: 'The tallest, juiciest challenge', map: 'bg-map-3', spots: ZIGZAG, levels: BERRY_MOUNTAIN },
 ];

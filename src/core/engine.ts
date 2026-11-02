@@ -1,7 +1,7 @@
 /** Resolves a whole player move (swap → matches → specials → cascades) into a list of
  *  steps. Pure and deterministic: the renderer just replays the steps, and the
  *  simulator uses exactly the same rules. */
-import { Board, COCONUT, Cell, FallMove, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
+import { Board, COCONUT, MUSH, Cell, FallMove, MatchGroup, RAINBOW, Spawn, Special, Tile, cellKey } from './board';
 import { groupScore } from './scoring';
 import { randInt } from './rng';
 
@@ -27,6 +27,8 @@ export interface Cleared {
   kind: number;
   r: number;
   c: number;
+  /** Golden (ripe) fruit counts double. */
+  golden?: boolean;
 }
 
 export interface Created {
@@ -68,7 +70,21 @@ export interface CollectStep {
   items: { tile: Tile; r: number; c: number }[];
 }
 
-export type Step = ClearStep | FallStep | ShuffleStep | CollectStep;
+/** End of move: green fruit ripens into golden fruit; old golden fruit spoils into mush. */
+export interface RipenStep {
+  type: 'ripen';
+  /** Unripe fruit that counted down but is still green. */
+  ticked: Tile[];
+  ripened: Tile[];
+  spoiled: Tile[];
+}
+
+export type Step = ClearStep | FallStep | ShuffleStep | CollectStep | RipenStep;
+
+/** Golden fruit spoils after this many moves. */
+export const SPOIL_MOVES = 6;
+/** Bonus points per golden fruit popped. */
+export const GOLDEN_POINTS = 100;
 
 export interface MoveResult {
   valid: boolean;
@@ -124,6 +140,8 @@ class StepBuilder {
   created: Created[] = [];
   pops: { cell: Cell; points: number }[] = [];
   matchedCount = 0;
+  /** Cells that were part of a match (mush next to them gets cleaned up). */
+  matchedCells: Cell[] = [];
   score = 0;
 
   constructor(private board: Board, private ctx: EngineCtx, readonly chain: number) {}
@@ -145,6 +163,12 @@ class StepBuilder {
   }
 
   run(): void {
+    // Matching next to mush cleans it up.
+    for (const { r, c } of this.matchedCells)
+      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const t = this.board.get(r + dr, c + dc);
+        if (t?.kind === MUSH) this.add({ r: r + dr, c: c + dc });
+      }
     while (this.queue.length) {
       const cell = this.queue.shift()!;
       const k = cellKey(cell.r, cell.c);
@@ -272,6 +296,7 @@ class StepBuilder {
         keep = candidates.find(usable) ?? null;
       }
       if (keep) this.protect.add(cellKey(keep.r, keep.c));
+      this.matchedCells.push(...g.cells);
       for (const cell of g.cells) {
         if (keep && cell.r === keep.r && cell.c === keep.c) continue;
         this.add(cell);
@@ -346,8 +371,9 @@ class StepBuilder {
     const cleared: Cleared[] = [];
     for (const cell of this.clear.values()) {
       const t = board.get(cell.r, cell.c)!;
-      cleared.push({ tile: t, kind: t.kind, r: cell.r, c: cell.c });
-      if (t.kind >= 0) collected[t.kind]++;
+      cleared.push({ tile: t, kind: t.kind, r: cell.r, c: cell.c, golden: t.golden });
+      if (t.kind >= 0) collected[t.kind] += t.golden ? 2 : 1;
+      if (t.golden) this.score += GOLDEN_POINTS * this.chain;
     }
     const blastCleared = Math.max(0, cleared.length - this.matchedCount);
     this.score += blastCleared * BLAST_POINTS * this.chain;
@@ -388,26 +414,15 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
   sb.run();
   push(sb.finalize(board, result.collected, combo));
 
-  for (let guard = 0; guard < 100; guard++) {
-    const falls = board.collapse();
-    const spawns = board.refill();
-    result.steps.push({ type: 'fall', falls, spawns });
-    // Coconuts that reached the bottom are collected; the gap refills.
-    for (let g2 = 0; g2 < 20; g2++) {
-      const items = board.collectCoconuts();
-      if (!items.length) break;
-      result.coconuts += items.length;
-      result.score += items.length * COCONUT_POINTS;
-      result.steps.push({ type: 'collect', items });
-      result.steps.push({ type: 'fall', falls: board.collapse(), spawns: board.refill() });
+  cascade();
+  // End of move: fruit ripens (which can set off more matches), old golden fruit spoils.
+  const ripen = ripenBoard(board);
+  if (ripen) {
+    result.steps.push(ripen);
+    if (board.findMatches().length) {
+      chain = 0;
+      cascade(true);
     }
-    groups = board.findMatches();
-    if (!groups.length) break;
-    chain++;
-    sb = new StepBuilder(board, ctx, chain);
-    sb.planGroups(groups, []);
-    sb.run();
-    push(sb.finalize(board, result.collected, false));
   }
 
   if (!board.findHint()) {
@@ -416,9 +431,65 @@ export function playMove(board: Board, a: Cell, b: Cell, ctx: EngineCtx): MoveRe
   }
   return result;
 
+  /** Fall, collect coconuts, and clear new matches until the board settles. */
+  function cascade(startWithMatches = false) {
+    for (let guard = 0; guard < 100; guard++) {
+      if (!startWithMatches || guard > 0) {
+        const falls = board.collapse();
+        const spawns = board.refill();
+        result.steps.push({ type: 'fall', falls, spawns });
+        // Coconuts that reached the bottom are collected; the gap refills.
+        for (let g2 = 0; g2 < 20; g2++) {
+          const items = board.collectCoconuts();
+          if (!items.length) break;
+          result.coconuts += items.length;
+          result.score += items.length * COCONUT_POINTS;
+          result.steps.push({ type: 'collect', items });
+          result.steps.push({ type: 'fall', falls: board.collapse(), spawns: board.refill() });
+        }
+      }
+      groups = board.findMatches();
+      if (!groups.length) break;
+      chain++;
+      sb = new StepBuilder(board, ctx, chain);
+      sb.planGroups(groups, []);
+      sb.run();
+      push(sb.finalize(board, result.collected, false));
+    }
+  }
   function push(step: ClearStep) {
     result.steps.push(step);
     result.score += step.score;
     result.sandCleared += step.sand.length;
   }
+}
+
+/** Advance ripening by one move. Returns null when nothing on the board is ripening. */
+export function ripenBoard(board: Board): RipenStep | null {
+  const step: RipenStep = { type: 'ripen', ticked: [], ripened: [], spoiled: [] };
+  let any = false;
+  for (const row of board.grid)
+    for (const t of row) {
+      if (!t) continue;
+      if (t.unripe) {
+        any = true;
+        t.unripe--;
+        if (t.unripe <= 0) {
+          delete t.unripe;
+          t.golden = true;
+          t.age = 0;
+          step.ripened.push(t);
+        } else step.ticked.push(t);
+      } else if (t.golden) {
+        any = true;
+        t.age = (t.age ?? 0) + 1;
+        if (t.age >= SPOIL_MOVES) {
+          t.kind = MUSH;
+          delete t.golden;
+          delete t.special;
+          step.spoiled.push(t);
+        }
+      }
+    }
+  return any ? step : null;
 }

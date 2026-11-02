@@ -16,11 +16,13 @@ export interface Lifetime {
   bestChain: number;
   lastMoveWins: number;
   questsDone: number;
+  customers: number;
+  golden: number;
 }
 
 export const freshLifetime = (): Lifetime => ({
   wins: 0, jets: 0, bees: 0, bursts: 0, smoothies: 0, combos: 0, fruit: 0, sand: 0, coconuts: 0,
-  bestScore: 0, bestChain: 0, lastMoveWins: 0, questsDone: 0,
+  bestScore: 0, bestChain: 0, lastMoveWins: 0, questsDone: 0, customers: 0, golden: 0,
 });
 
 export function addReport(l: Lifetime, r: LevelReport): void {
@@ -33,6 +35,8 @@ export function addReport(l: Lifetime, r: LevelReport): void {
   l.fruit += r.fruit;
   l.sand += r.sand;
   l.coconuts += r.coconuts;
+  l.customers += r.customers ?? 0;
+  l.golden += r.golden ?? 0;
   l.bestScore = Math.max(l.bestScore, r.score);
   l.bestChain = Math.max(l.bestChain, r.maxChain);
   if (r.won && r.movesLeft === 0) l.lastMoveWins++;
@@ -59,6 +63,8 @@ export interface Achievement {
 export const ACHIEVEMENTS: Achievement[] = [
   { id: 'first-win', icon: '🎉', name: 'First Fiesta', desc: 'Win your first level', target: 1, value: (c) => c.life.wins },
   { id: 'wins-25', icon: '🏅', name: 'Party Regular', desc: 'Win 25 levels', target: 25, value: (c) => c.life.wins },
+  { id: 'barista', icon: '🥤', name: 'Star Barista', desc: 'Serve 50 café customers', target: 50, value: (c) => c.life.customers },
+  { id: 'golden', icon: '✨', name: 'Golden Touch', desc: 'Pop 100 golden fruit', target: 100, value: (c) => c.life.golden },
   { id: 'jets', icon: '🧃', name: 'Juice Master', desc: 'Make 50 Juice Jets', target: 50, value: (c) => c.life.jets },
   { id: 'bees', icon: '🐝', name: 'Bee Keeper', desc: 'Make 30 Busy Bees', target: 30, value: (c) => c.life.bees },
   { id: 'bursts', icon: '💥', name: 'Kaboom!', desc: 'Make 30 Fruit Bursts', target: 30, value: (c) => c.life.bursts },

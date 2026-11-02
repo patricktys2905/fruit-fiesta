@@ -6,7 +6,7 @@ import { Renderer } from './renderer';
 import { Hud } from './hud';
 import { Game, LevelResult } from './game';
 import { sfx } from './audio';
-import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl } from './fruitArt';
+import { fruitIconUrl, clearIconCache, makeBeeSprite, sandIconUrl, goldenIconUrl } from './fruitArt';
 import { artReady, artUrl } from './art';
 import { setupPwa, toast } from './pwa';
 import { Meta } from './metaUi';
@@ -63,6 +63,8 @@ $('btn-play').onclick = () => {
 
 /** Picture shown on a level's map stop and card: its main goal. */
 function levelIcon(l: LevelDef): string {
+  if (l.cafe) return fruitIconUrl(-1);
+  if (l.golden) return goldenIconUrl();
   if (l.collect[0]) return fruitIconUrl(l.collect[0].kind);
   if (l.coconuts) return fruitIconUrl(COCONUT);
   if (hasSand(l)) return sandIconUrl();
@@ -236,6 +238,8 @@ function openLevelCard(lvl: LevelDef) {
     ? specs.map((g) => `<span class="lc-goal-item"><img alt="${g.label}" src="${g.icon}"><b>${g.count}</b></span>`).join('')
     : `<span class="lc-goal-item score"><b>${lvl.stars[0].toLocaleString()}</b> points</span>`;
   const tips: string[] = [];
+  if (lvl.cafe) tips.push(`Serve ${lvl.cafe.serve} customers before they lose patience`);
+  if (lvl.ripen) tips.push('Green fruit ripens into golden fruit worth double, but spoils if left too long');
   if (hasSand(lvl)) tips.push('Match fruit on the sand to wash it away');
   if (lvl.coconuts) tips.push('Drop coconuts to the bottom to collect them');
   $('lc-tip').textContent = tips.join(' · ');

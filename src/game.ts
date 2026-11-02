@@ -7,6 +7,8 @@ import { Hud } from './hud';
 import { sfx } from './audio';
 import { GoalSpec, goalSpecs } from './goals';
 import { LevelReport, emptyReport } from './meta/report';
+import { Cafe } from './core/orders';
+import { CafeView } from './cafeUi';
 import { wait } from './tween';
 
 export interface LevelResult {
@@ -27,6 +29,9 @@ export class Game {
   private moves = 0;
   private collected: number[] = [];
   private coconuts = 0;
+  private golden = 0;
+  private cafe: Cafe | null = null;
+  private cafeView = new CafeView();
   private report: LevelReport = emptyReport(0);
   /** Moves made in the current attempt (quitting after a move costs a life). */
   movesMade = 0;
@@ -57,6 +62,9 @@ export class Game {
     this.moves = level.moves;
     this.collected = Array(6).fill(0);
     this.coconuts = 0;
+    this.golden = 0;
+    this.cafe = level.cafe ? new Cafe(level.cafe, level.kinds, (seedOverride ?? level.seed) + level.id) : null;
+    this.cafeView.show(this.cafe);
     this.report = emptyReport(level.id);
     this.movesMade = 0;
     this.board = createBoard(level, seedOverride ?? level.seed);
@@ -144,9 +152,15 @@ export class Game {
   private shownSand = 0;
 
   private goalsLeft(): number[] {
-    return this.specs.map((g) =>
-      g.key === 'fruit' ? g.count - this.collected[g.kind!] : g.key === 'sand' ? this.shownSand : g.count - this.coconuts,
-    );
+    return this.specs.map((g) => {
+      switch (g.key) {
+        case 'fruit': return g.count - this.collected[g.kind!];
+        case 'sand': return this.shownSand;
+        case 'coconut': return g.count - this.coconuts;
+        case 'golden': return g.count - this.golden;
+        case 'orders': return this.cafe ? this.cafe.remaining : 0;
+      }
+    });
   }
 
   private updateHud(): void {
@@ -154,6 +168,7 @@ export class Game {
   }
 
   private wantedKinds(): number[] {
+    if (this.cafe) return this.cafe.wanted();
     return this.level.collect.filter((g) => this.collected[g.kind] < g.count).map((g) => g.kind);
   }
 
@@ -188,6 +203,17 @@ export class Game {
     this.updateHud();
     await this.replay(result.steps, session);
     if (session !== this.session) return;
+    // A move has passed at the café: customers get less patient.
+    if (this.cafe) {
+      const t = this.cafe.tick();
+      for (const o of t.left) {
+        void this.cafeView.walkedOut(o);
+        sfx.invalid();
+      }
+      this.cafeView.refresh();
+      setTimeout(() => this.cafeView.sync(), t.left.length ? 700 : 0);
+      this.report.walkouts += t.left.length;
+    }
 
     if (this.isWon() && this.specs.length > 0) return this.finish(true, session);
     if (this.moves <= 0) return this.finish(this.isWon(), session);
@@ -212,6 +238,10 @@ export class Game {
           else rep.smoothies++;
         }
         rep.sand += step.sand.length;
+        const goldenNow = step.cleared.filter((c) => c.golden).length;
+        this.golden += goldenNow;
+        rep.golden += goldenNow;
+        if (this.cafe) this.pourIntoCafe(step);
         for (const cl of step.cleared) {
           if (cl.kind < 0) continue;
           rep.fruit++;
@@ -243,6 +273,8 @@ export class Game {
         await this.renderer.playClear(step);
       } else if (step.type === 'fall') {
         await this.renderer.dropTiles(step.falls, step.spawns);
+      } else if (step.type === 'ripen') {
+        await this.renderer.playRipen(step);
       } else if (step.type === 'collect') {
         this.coconuts += step.items.length;
         this.report.coconuts += step.items.length;
@@ -256,6 +288,31 @@ export class Game {
         await this.renderer.shuffleTo(this.board);
       }
     }
+  }
+
+  /** Matched fruit flies into the waiting customers' orders. */
+  private pourIntoCafe(step: Extract<Step, { type: 'clear' }>): void {
+    const cafe = this.cafe!;
+    const before = new Map(cafe.active.map((o) => [o.id, o]));
+    const res = cafe.feed(step.cleared);
+    res.pours.forEach((p, i) => {
+      const o = before.get(p.orderId);
+      const cl = step.cleared[p.from];
+      if (o && cl) void this.cafeView.fly(p.kind, this.renderer.cellCenterClient(cl), o, 120 + i * 25);
+    });
+    for (const o of res.served) {
+      const tip = cafe.tipFor(o);
+      this.score += tip;
+      this.report.customers++;
+      setTimeout(() => {
+        void this.cafeView.served(o, tip);
+        this.renderer.banner(`Order up! +${tip}`, '#ffe36b');
+        sfx.win();
+        this.updateHud();
+        this.hud.bump();
+      }, 600);
+    }
+    setTimeout(() => this.cafeView.sync(), res.served.length ? 1500 : 600);
   }
 
   private isWon(): boolean {

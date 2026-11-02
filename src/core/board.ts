@@ -10,6 +10,12 @@ export interface Tile {
   id: number;
   kind: number;
   special?: Special;
+  /** Moves until this unripe (green) fruit ripens. Unripe fruit can't be matched. */
+  unripe?: number;
+  /** Ripe golden fruit: counts double. */
+  golden?: boolean;
+  /** Moves a golden fruit has waited; it spoils into mush when too old. */
+  age?: number;
 }
 
 export interface Cell {
@@ -35,12 +41,17 @@ export interface Spawn {
   c: number;
   /** Virtual (negative) row the tile starts falling from, above the board. */
   dropFrom: number;
+  /** Ripening countdown at the moment it spawned. */
+  unripe?: number;
 }
 
 export const cellKey = (r: number, c: number) => r * 1000 + c;
 
 /** Kind used by coconuts: can't be matched or blasted; drop them to the bottom to collect. */
 export const COCONUT = -2;
+
+/** Spoiled fruit: can't be matched; cleared by a match next to it or by a blast. */
+export const MUSH = -3;
 
 /** Pure game-board logic: no rendering, fully deterministic for a given RNG.
  *
@@ -57,6 +68,10 @@ export class Board {
   coconutsToSpawn = 0;
   /** Max coconuts on the board at once. */
   maxCoconuts = 1;
+  /** Chance a new fruit arrives unripe (0 = ripening off). */
+  unripeChance = 0;
+  /** Moves for unripe fruit to ripen. */
+  ripenTurns = 3;
   private nextId = 1;
   private layout: string[] | null;
 
@@ -125,9 +140,20 @@ export class Board {
     return t;
   }
 
-  /** Same colour, and a real fruit (not a Rainbow Smoothie). */
+  /** Same colour, a real fruit (not a Smoothie/coconut/mush), and ripe. */
   private same(t: Tile | null, kind: number): boolean {
-    return !!t && t.kind >= 0 && t.kind === kind;
+    return !!t && t.kind >= 0 && !t.unripe && t.kind === kind && !t.unripe;
+  }
+
+  /** Maybe make a freshly spawned fruit unripe. */
+  private maybeUnripe(t: Tile): Tile {
+    if (this.unripeChance > 0 && t.kind >= 0 && this.rng() < this.unripeChance) t.unripe = this.ripenTurns;
+    return t;
+  }
+
+  /** Sprinkle unripe fruit over a freshly filled board (used at level start). */
+  seedUnripe(): void {
+    for (const row of this.grid) for (const t of row) if (t) this.maybeUnripe(t);
   }
 
   /** Fill the board with no starting matches (lines or 2x2 squares) and at least one valid move. */
@@ -172,7 +198,7 @@ export class Board {
   /** Does the tile at (r,c) currently sit in a line of 3+ or a 2x2 square? */
   matchAt(r: number, c: number): boolean {
     const t = this.get(r, c);
-    if (!t || t.kind < 0) return false;
+    if (!t || t.kind < 0 || t.unripe) return false;
     const k = t.kind;
     let h = 1;
     for (let x = c - 1; this.same(this.get(r, x), k); x--) h++;
@@ -211,8 +237,8 @@ export class Board {
       while (c < this.cols) {
         const t = this.get(r, c);
         let e = c + 1;
-        if (t && t.kind >= 0) while (e < this.cols && this.same(this.get(r, e), t.kind)) e++;
-        if (t && t.kind >= 0 && e - c >= 3) runs.push(Array.from({ length: e - c }, (_, i) => ({ r, c: c + i })));
+        if (t && t.kind >= 0 && !t.unripe) while (e < this.cols && this.same(this.get(r, e), t.kind)) e++;
+        if (t && t.kind >= 0 && !t.unripe && e - c >= 3) runs.push(Array.from({ length: e - c }, (_, i) => ({ r, c: c + i })));
         c = e;
       }
     }
@@ -221,15 +247,15 @@ export class Board {
       while (r < this.rows) {
         const t = this.get(r, c);
         let e = r + 1;
-        if (t && t.kind >= 0) while (e < this.rows && this.same(this.get(e, c), t.kind)) e++;
-        if (t && t.kind >= 0 && e - r >= 3) runs.push(Array.from({ length: e - r }, (_, i) => ({ r: r + i, c })));
+        if (t && t.kind >= 0 && !t.unripe) while (e < this.rows && this.same(this.get(e, c), t.kind)) e++;
+        if (t && t.kind >= 0 && !t.unripe && e - r >= 3) runs.push(Array.from({ length: e - r }, (_, i) => ({ r: r + i, c })));
         r = e;
       }
     }
     for (let r = 0; r < this.rows - 1; r++) {
       for (let c = 0; c < this.cols - 1; c++) {
         const t = this.get(r, c);
-        if (t && t.kind >= 0 && this.same(this.get(r, c + 1), t.kind) && this.same(this.get(r + 1, c), t.kind) && this.same(this.get(r + 1, c + 1), t.kind)) {
+        if (t && t.kind >= 0 && !t.unripe && this.same(this.get(r, c + 1), t.kind) && this.same(this.get(r + 1, c), t.kind) && this.same(this.get(r + 1, c + 1), t.kind)) {
           runs.push([{ r, c }, { r, c: c + 1 }, { r: r + 1, c }, { r: r + 1, c: c + 1 }]);
         }
       }
@@ -312,9 +338,9 @@ export class Board {
           coconutRoom--;
           this.coconutsToSpawn--;
         }
-        const t = this.newTile(kind);
+        const t = this.maybeUnripe(this.newTile(kind));
         this.grid[r][c] = t;
-        spawns.push({ tile: t, r, c, dropFrom: (rows[0] ?? 0) - (empty - i) });
+        spawns.push({ tile: t, r, c, dropFrom: (rows[0] ?? 0) - (empty - i), unripe: t.unripe });
       }
     }
     return spawns;

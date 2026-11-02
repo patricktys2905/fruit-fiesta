@@ -1,9 +1,9 @@
 /** A level's goals in a display-friendly form (shared by the HUD and the level card). */
 import { COCONUT } from './core/board';
 import { LevelDef } from './core/levels';
-import { fruitIconUrl, sandIconUrl } from './fruitArt';
+import { fruitIconUrl, sandIconUrl, goldenIconUrl } from './fruitArt';
 
-export type GoalKey = 'fruit' | 'sand' | 'coconut';
+export type GoalKey = 'fruit' | 'sand' | 'coconut' | 'golden' | 'orders';
 
 export interface GoalSpec {
   key: GoalKey;
@@ -19,7 +19,10 @@ export function sandTotal(level: LevelDef): number {
 }
 
 export function goalSpecs(level: LevelDef): GoalSpec[] {
-  const out: GoalSpec[] = level.collect.map((g) => ({ key: 'fruit' as const, kind: g.kind, count: g.count, icon: fruitIconUrl(g.kind), label: 'fruit' }));
+  const out: GoalSpec[] = [];
+  if (level.cafe) out.push({ key: 'orders', count: level.cafe.serve, icon: fruitIconUrl(-1), label: 'customers' });
+  out.push(...level.collect.map((g) => ({ key: 'fruit' as const, kind: g.kind, count: g.count, icon: fruitIconUrl(g.kind), label: 'fruit' })));
+  if (level.golden) out.push({ key: 'golden', count: level.golden, icon: goldenIconUrl(), label: 'golden fruit' });
   const sand = sandTotal(level);
   if (sand) out.push({ key: 'sand', count: sand, icon: sandIconUrl(), label: 'sand' });
   if (level.coconuts) out.push({ key: 'coconut', count: level.coconuts, icon: fruitIconUrl(COCONUT), label: 'coconuts' });

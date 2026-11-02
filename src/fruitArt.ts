@@ -454,6 +454,94 @@ export function makeSandSprite(layers: number, px: number): HTMLCanvasElement {
   return cv;
 }
 
+/** Spoiled fruit: a squishy brown blob. */
+export function makeMushSprite(px: number): HTMLCanvasElement {
+  const { cv, ctx } = blank(px);
+  ctx.scale(cv.width, cv.height);
+  ctx.fillStyle = 'rgba(0,40,60,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(0.5, 0.9, 0.32, 0.06, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0.14, 0.82);
+  ctx.bezierCurveTo(0.06, 0.6, 0.2, 0.36, 0.36, 0.4);
+  ctx.bezierCurveTo(0.4, 0.2, 0.62, 0.2, 0.66, 0.38);
+  ctx.bezierCurveTo(0.84, 0.36, 0.96, 0.62, 0.86, 0.82);
+  ctx.quadraticCurveTo(0.5, 0.92, 0.14, 0.82);
+  ctx.fillStyle = radial(ctx, 0.42, 0.45, 0.5, [[0, '#a68a5a'], [0.6, '#7a6236'], [1, '#4f3d1e']]);
+  ctx.fill();
+  outline(ctx, 'rgba(40,30,10,0.6)');
+  ctx.fillStyle = 'rgba(60,90,30,0.55)';
+  for (const [x, y, r] of [[0.32, 0.62, 0.06], [0.6, 0.55, 0.05], [0.7, 0.72, 0.04], [0.45, 0.76, 0.035]]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // droopy face
+  ctx.strokeStyle = '#2e2210';
+  ctx.lineWidth = 0.025;
+  ctx.beginPath();
+  ctx.moveTo(0.38, 0.5); ctx.lineTo(0.46, 0.53);
+  ctx.moveTo(0.62, 0.5); ctx.lineTo(0.54, 0.53);
+  ctx.moveTo(0.42, 0.66); ctx.quadraticCurveTo(0.5, 0.6, 0.58, 0.66);
+  ctx.stroke();
+  shine(ctx, 0.36, 0.44, 0.06, 0.025, -0.5, 0.35);
+  return cv;
+}
+
+/** Recolour a fruit sprite: unripe (green, dull) or golden (shiny). */
+export function tintSprite(src: HTMLCanvasElement, mode: 'unripe' | 'golden'): HTMLCanvasElement {
+  const cv = document.createElement('canvas');
+  cv.width = src.width;
+  cv.height = src.height;
+  const ctx = cv.getContext('2d')!;
+  if (mode === 'unripe') {
+    ctx.filter = 'saturate(0.35) brightness(0.95)';
+    ctx.drawImage(src, 0, 0);
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(110,190,60,0.55)';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+  } else {
+    ctx.drawImage(src, 0, 0);
+    ctx.globalCompositeOperation = 'source-atop';
+    const g = ctx.createLinearGradient(0, 0, cv.width, cv.height);
+    g.addColorStop(0, 'rgba(255,240,150,0.55)');
+    g.addColorStop(0.5, 'rgba(255,200,40,0.45)');
+    g.addColorStop(1, 'rgba(230,150,0,0.5)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+  }
+  return cv;
+}
+
+let goldenIcon = '';
+export function goldenIconUrl(): string {
+  if (!goldenIcon) {
+    const { cv, ctx } = blank(96);
+    const g = ctx.createRadialGradient(48, 48, 8, 48, 48, 48);
+    g.addColorStop(0, 'rgba(255,240,140,1)');
+    g.addColorStop(1, 'rgba(255,200,40,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 96, 96);
+    ctx.drawImage(tintSprite(makeFruitSprite(1, 96), 'golden'), 8, 8, 80, 80);
+    // sparkle star
+    ctx.fillStyle = '#fffbe0';
+    ctx.strokeStyle = '#d99a00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const r = i % 2 ? 6 : 18, a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+      ctx.lineTo(74 + Math.cos(a) * r, 22 + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    goldenIcon = cv.toDataURL();
+  }
+  return goldenIcon;
+}
+
 let sandIcon = '';
 export function sandIconUrl(): string {
   if (!sandIcon) sandIcon = makeSandSprite(2, 96).toDataURL();
@@ -478,4 +566,5 @@ export function fruitIconUrl(kind: number): string {
 }
 export function clearIconCache(): void {
   iconCache.clear();
+  goldenIcon = '';
 }
