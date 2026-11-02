@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dev-dist/
+*.log
+.DS_Store
+# Raw Gemini downloads are large; the cleaned versions live in src/art/
+art-src/raw/*
+!art-src/raw/.gitkeep
