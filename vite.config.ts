@@ -6,7 +6,8 @@ export default defineConfig({
   base: './',
   plugins: [
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' so a new version never reloads the page mid-level; src/pwa.ts applies it on the menus.
+      registerType: 'prompt',
       includeAssets: ['icon.svg', 'icons/apple-touch-icon.png'],
       manifest: {
         id: './',

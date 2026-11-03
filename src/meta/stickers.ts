@@ -1,4 +1,4 @@
-/** Sticker Album: 10 pages (one per world) of 6 stickers. Pure functions for testing. */
+/** Sticker Album: one page of 6 stickers per world (add a row to NAMES for each new world). Pure functions for testing. */
 import { Rng, randInt } from '../core/rng';
 import { Reward } from './economy';
 
@@ -19,7 +19,11 @@ const NAMES: string[][] = [
   ['Ferris Wheel', 'Carousel', 'Cotton Candy', 'Balloons', 'Golden Ticket', 'Popcorn'],
   ['Little Volcano', 'Lava Blob', 'Baby Dino', 'Fire Flower', 'Hot Spring', 'Toucan'],
   ['Fireworks', 'Trophy', 'Fruit Crown', 'Party Cake', 'Berry Balloon', 'Fiesta Pineapple'],
+  ['Happy Starfruit', 'Cloud Buddy', 'Kite', 'Hot-Air Balloon', 'Sky Island', 'Little Rainbow'],
 ];
+
+/** Number of album pages (one per world that has stickers). */
+export const ALBUM_PAGES = NAMES.length;
 
 export const STICKERS: StickerDef[] = NAMES.flatMap((page, w) => page.map((name, i) => ({ id: `${w + 1}-${i + 1}`, world: w + 1, name })));
 export const PAGE_SIZE = 6;

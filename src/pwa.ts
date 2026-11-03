@@ -16,15 +16,41 @@ export function toast(text: string, ms = 2800): void {
   (el as unknown as { _t?: number })._t = window.setTimeout(() => el.classList.add('hidden'), ms);
 }
 
-export function setupPwa(): void {
+/** Offline support and updates. `safeToReload` says whether the player is somewhere a reload
+ *  won't lose anything (not mid-level). New versions are fetched in the background and
+ *  applied on the menus, so players get new levels without reinstalling. */
+export function setupPwa(safeToReload: () => boolean): void {
   if (import.meta.env.DEV) return; // service worker only in the real build
 
-  registerSW({
+  let waiting = false;
+  const updateSW = registerSW({
     immediate: true,
     onOfflineReady() {
       toast('✅ Ready to play offline!');
     },
+    onNeedRefresh() {
+      waiting = true;
+      if (safeToReload()) apply();
+    },
+    onRegisteredSW(_url, reg) {
+      if (!reg) return;
+      // Installed apps can stay open for days: look for updates hourly and when reopened.
+      setInterval(() => void reg.update().catch(() => {}), 60 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void reg.update().catch(() => {});
+      });
+    },
   });
+  const apply = () => {
+    if (!waiting) return;
+    waiting = false;
+    toast('✨ Updating Fruit Fiesta…');
+    setTimeout(() => void updateSW(true), 900);
+  };
+  // If the update arrived mid-level, apply it the next time the player is on a menu.
+  new MutationObserver(() => {
+    if (waiting && safeToReload()) apply();
+  }).observe(document.body, { attributes: true, attributeFilter: ['data-screen'] });
 
   const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone;
   if (standalone) return;

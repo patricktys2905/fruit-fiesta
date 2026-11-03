@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { STICKERS, freshAlbum, dropSticker, pageComplete, pageStickers, ownedCount } from '../src/meta/stickers';
+import { STICKERS, ALBUM_PAGES, freshAlbum, dropSticker, pageComplete, pageStickers, ownedCount } from '../src/meta/stickers';
 import { dailyLevel, recordDaily, freshDailyPuzzle, DAILY_ID } from '../src/meta/dailyPuzzle';
 import { createBoard } from '../src/core/levels';
 import { mulberry32 } from '../src/core/rng';
 
 describe('sticker album', () => {
-  it('has 10 pages of 6 unique stickers', () => {
-    expect(STICKERS).toHaveLength(60);
-    expect(new Set(STICKERS.map((s) => s.id)).size).toBe(60);
-    for (let w = 1; w <= 10; w++) expect(pageStickers(w)).toHaveLength(6);
+  it('has a page of 6 unique stickers per world', () => {
+    expect(STICKERS).toHaveLength(ALBUM_PAGES * 6);
+    expect(new Set(STICKERS.map((s) => s.id)).size).toBe(ALBUM_PAGES * 6);
+    for (let w = 1; w <= ALBUM_PAGES; w++) expect(pageStickers(w)).toHaveLength(6);
   });
 
   it('only drops stickers from reached worlds, favours new ones, and pages fill up', () => {

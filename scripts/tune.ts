@@ -12,13 +12,16 @@ const tuning: Record<string, Record<string, unknown>> = JSON.parse(fs.readFileSy
 const TARGET: Record<number, [number, number]> = {
   1: [0.95, 1.01], 2: [0.88, 0.99], 3: [0.86, 0.98], 4: [0.84, 0.96], 5: [0.82, 0.95],
   6: [0.8, 0.94], 7: [0.78, 0.93], 8: [0.76, 0.92], 9: [0.74, 0.91], 10: [0.72, 0.9],
+  11: [0.72, 0.9],
 };
 
 /** Target win rate for a random ("casual") player, by world. */
 const RAND: Record<number, [number, number]> = {
   1: [0.55, 0.85], 2: [0.3, 0.7], 3: [0.25, 0.65], 4: [0.22, 0.6], 5: [0.18, 0.55],
   6: [0.16, 0.5], 7: [0.14, 0.48], 8: [0.12, 0.45], 9: [0.1, 0.42], 10: [0.08, 0.4],
+  11: [0.08, 0.4],
 };
+// Worlds after 11 keep the World 11 targets: later worlds add variety, not ever-harder levels.
 /** Levels never get shorter than this; short levels feel rushed. */
 const MIN_MOVES = 16;
 /** ...and never longer than this. */
@@ -27,8 +30,8 @@ const MAX_MOVES = 36;
 const [from, to] = [Number(process.argv[2] ?? 1), Number(process.argv[3] ?? LEVELS.length)];
 for (const level of LEVELS.filter((l) => l.id >= from && l.id <= to)) {
   const world = WORLDS.find((w) => w.levels.includes(level))!.id;
-  const [lo, hi] = TARGET[world] ?? [0.75, 0.92];
-  let [rlo, rhi] = RAND[world] ?? [0.15, 0.5];
+  const [lo, hi] = TARGET[Math.min(world, 11)];
+  let [rlo, rhi] = RAND[Math.min(world, 11)];
   // Random play is hopeless at steering coconuts; people aim them, so ask less of the casual bot there.
   if (level.coconuts) rlo *= 0.4;
   level.moves = Math.min(level.moves, MAX_MOVES);
@@ -54,6 +57,9 @@ for (const level of LEVELS.filter((l) => l.id >= from && l.id <= to)) {
 function harden(level: (typeof LEVELS)[number]): boolean {
   let changed = false;
   if (level.cafe && level.cafe.serve < 10) { level.cafe = { ...level.cafe, serve: level.cafe.serve + 1 }; changed = true; }
+  // Still too easy with 10 customers: less patience, then bigger orders.
+  else if (level.cafe && level.cafe.patience > 6) { level.cafe = { ...level.cafe, patience: level.cafe.patience - 1 }; changed = true; }
+  else if (level.cafe && level.cafe.size[1] < 14) { level.cafe = { ...level.cafe, size: [level.cafe.size[0] + 1, level.cafe.size[1] + 1] }; changed = true; }
   if (level.collect.length) { level.collect = level.collect.map((g) => ({ ...g, count: Math.round(g.count * 1.25) })); changed = true; }
   if (level.golden) { level.golden = Math.round(level.golden * 1.25); changed = true; }
   const fixedGoal = level.cafe || level.collect.length || level.golden || level.coconuts || level.layout?.some((r) => /[sSiIpv]/.test(r));

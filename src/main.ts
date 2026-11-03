@@ -12,6 +12,7 @@ import { setupPwa, toast } from './pwa';
 import { Meta } from './metaUi';
 import { BOOSTERS } from './meta/economy';
 import { loadProgress, saveProgress, isUnlocked } from './save';
+import { unseenUpdates, markUpdatesSeen, UPDATES, UpdateNote } from './updates';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -106,7 +107,36 @@ function openLevels(worldIndex?: number) {
   renderWorld(0);
 }
 
+function slideMap(direction: number) {
+  const map = $('map');
+  if (!direction) return;
+  map.classList.remove('slide-left', 'slide-right');
+  void map.offsetWidth;
+  map.classList.add(direction > 0 ? 'slide-left' : 'slide-right');
+}
+
+/** One page past the last world: a "coming soon" teaser, so players know more is on the way. */
+function renderComingSoon(direction: number) {
+  const map = $('map');
+  $('world-sub').textContent = 'Coming soon';
+  $('world-name').textContent = 'New islands';
+  $('map-blurb').textContent = 'More levels arrive in future updates!';
+  const art = artUrl(WORLDS[WORLDS.length - 1].map);
+  map.style.backgroundImage = art ? `url("${art}")` : '';
+  map.classList.add('locked-world');
+  $('map-lock-text').textContent = 'New islands are on the way 🌴';
+  $<HTMLButtonElement>('world-prev').disabled = false;
+  $<HTMLButtonElement>('world-next').disabled = true;
+  slideMap(direction);
+  const stars = LEVELS.reduce((n, l) => n + (progress.stars[l.id] ?? 0), 0);
+  $('total-stars').textContent = `★ ${stars}/${LEVELS.length * 3}`;
+  $('map-path').innerHTML = '';
+  $('map-nodes').innerHTML = '';
+  $('map-bee').classList.add('hidden');
+}
+
 function renderWorld(direction: number) {
+  if (viewWorld >= WORLDS.length) return renderComingSoon(direction);
   const world = WORLDS[viewWorld];
   const open = worldUnlocked(world);
   const cur = currentLevelId();
@@ -120,12 +150,8 @@ function renderWorld(direction: number) {
   map.classList.toggle('locked-world', !open);
   $('map-lock-text').textContent = viewWorld > 0 ? `Finish ${WORLDS[viewWorld - 1].name} to unlock` : '';
   $<HTMLButtonElement>('world-prev').disabled = viewWorld === 0;
-  $<HTMLButtonElement>('world-next').disabled = viewWorld === WORLDS.length - 1;
-  if (direction) {
-    map.classList.remove('slide-left', 'slide-right');
-    void map.offsetWidth;
-    map.classList.add(direction > 0 ? 'slide-left' : 'slide-right');
-  }
+  $<HTMLButtonElement>('world-next').disabled = false; // the last world leads to the "coming soon" page
+  slideMap(direction);
 
   const stars = world.levels.reduce((n, l) => n + (progress.stars[l.id] ?? 0), 0);
   $('total-stars').textContent = `★ ${stars}/${world.levels.length * 3}`;
@@ -206,7 +232,7 @@ function renderWorld(direction: number) {
 
 function changeWorld(delta: number) {
   const next = viewWorld + delta;
-  if (next < 0 || next >= WORLDS.length) return;
+  if (next < 0 || next > WORLDS.length) return;
   viewWorld = next;
   sfx.select();
   renderWorld(delta);
@@ -354,6 +380,7 @@ function onLevelEnd(r: LevelResult) {
   st.classList.toggle('hidden', !info.stickers.length);
   const next = daily ? undefined : LEVELS.find((l) => l.id === r.level.id + 1);
   $('btn-modal-next').classList.toggle('hidden', !r.won || !next);
+  if (r.won && !next && !daily) $('modal-note').textContent = `🎉 You've beaten every level! New islands are coming in a future update.`;
   $('modal').classList.remove('hidden');
 }
 
@@ -366,8 +393,29 @@ $('btn-modal-next').onclick = () => {
   if (next) startLevel(next);
 };
 
+// ---------- what's new ----------
+function openWhatsNew(list: UpdateNote[]) {
+  $('panel-title').textContent = "✨ What's new";
+  $('panel-sub').textContent = list.length === 1 ? list[0].date : 'Thanks for playing!';
+  $('panel-back').classList.add('hidden');
+  const esc = (t: string) => t.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]!);
+  $('panel-body').innerHTML = list
+    .map((u) => `<div class="news"><h3>${esc(u.title)}</h3><ul>${u.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>`)
+    .join('');
+  $('panel').classList.remove('hidden');
+  markUpdatesSeen(localStorage);
+}
+$('btn-news').onclick = () => {
+  sfx.select();
+  openWhatsNew(UPDATES.slice(0, 3));
+};
+
 show('title');
-setupPwa();
+setupPwa(() => document.body.dataset.screen !== 'game');
+{
+  const fresh = unseenUpdates(localStorage, Object.keys(progress.stars).length === 0);
+  if (fresh.length) setTimeout(() => openWhatsNew(fresh), 600);
+}
 
 if (import.meta.env.DEV) (window as unknown as { __ff: unknown }).__ff = { game, renderer, LEVELS, startLevel, progress, openLevels };
 

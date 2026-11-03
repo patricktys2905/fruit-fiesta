@@ -9,7 +9,7 @@ import { LevelReport } from './meta/report';
 import { LEVELS, WORLDS } from './core/levels';
 import { Progress, isUnlocked } from './save';
 import { toast } from './pwa';
-import { STICKERS, StickerDef, AlbumState, freshAlbum, dropSticker, pageStickers, pageComplete, ownedCount, stickerArt, PAGE_REWARD, ALBUM_REWARD, DUPLICATE_COINS } from './meta/stickers';
+import { STICKERS, ALBUM_PAGES, StickerDef, AlbumState, freshAlbum, dropSticker, pageStickers, pageComplete, ownedCount, stickerArt, PAGE_REWARD, ALBUM_REWARD, DUPLICATE_COINS } from './meta/stickers';
 import { DailyPuzzleState, freshDailyPuzzle, recordDaily, dailyLevel } from './meta/dailyPuzzle';
 import { artUrl } from './art';
 import {
@@ -572,18 +572,18 @@ export class Meta {
 
   private albumClaimable(): boolean {
     const a = this.s.album;
-    for (let w = 1; w <= 10; w++) if (pageComplete(a, w) && !a.pagesClaimed.includes(w)) return true;
+    for (let w = 1; w <= ALBUM_PAGES; w++) if (pageComplete(a, w) && !a.pagesClaimed.includes(w)) return true;
     return ownedCount(a) === STICKERS.length && !a.albumClaimed;
   }
 
   openAlbum(page = 0): void {
     sfx.select();
     const a = this.s.album;
-    const world = page || Math.min(10, Math.max(1, this.maxWorld()));
+    const world = page || Math.min(ALBUM_PAGES, Math.max(1, this.maxWorld()));
     const body = this.panel('📔 Sticker Album', `<b>${ownedCount(a)}</b> of ${STICKERS.length} collected · win levels to find more`);
     const tabs = document.createElement('div');
     tabs.className = 'album-tabs';
-    for (let w = 1; w <= 10; w++) {
+    for (let w = 1; w <= ALBUM_PAGES; w++) {
       const t = document.createElement('button');
       const got = pageStickers(w).filter((st) => a.owned[st.id]).length;
       t.className = 'album-tab' + (w === world ? ' on' : '') + (got === 6 ? ' full' : '');

@@ -2,6 +2,8 @@ import { Board, COCONUT, Conveyor } from './board';
 import { mulberry32 } from './rng';
 import { CafeDef } from './orders';
 import tuning from './tuning.json';
+import { L, ZIGZAG } from './levelKit';
+import { STARFRUIT_SKIES } from './worlds/w11-starfruit-skies';
 
 export interface CollectGoal {
   kind: number;
@@ -95,14 +97,6 @@ export function createBoard(level: LevelDef, seed = level.seed): Board {
   }
   return b;
 }
-
-type Def = Omit<LevelDef, 'cols' | 'rows' | 'seed'> & { cols?: number; rows?: number; seed?: number };
-const L = (d: Def): LevelDef => ({
-  cols: d.layout?.[0].length ?? 8,
-  rows: d.layout?.length ?? 9,
-  seed: d.id * 101,
-  ...d,
-});
 
 // Fruit kinds: 0 Strawberry, 1 Orange, 2 Lemon, 3 Kiwi, 4 Grape, 5 Blueberry
 
@@ -465,7 +459,7 @@ const FIREFLY_NIGHT: LevelDef[] = [
 const CARNIVAL_PIER: LevelDef[] = [
   L({ id: 0, seed: 8101, name: 'All Aboard', kinds: 5, moves: 22, stars: [5000, 10000, 15000], collect: [], personalities: true, conveyors: [{ row: 4, dir: 1 }] }),
   L({ id: 0, seed: 8102, name: 'Two-Way Ride', kinds: 5, moves: 22, stars: [2000, 9000, 13000], collect: [{ kind: 1, count: 25 }], personalities: true, conveyors: [{ row: 2, dir: 1 }, { row: 6, dir: -1 }] }),
-  L({ id: 0, seed: 8103, name: 'Sushi-Belt Café', kinds: 5, moves: 24, stars: [1500, 9000, 13000], collect: [], personalities: true, cafe: { serve: 8, slots: 2, patience: 7, size: [9, 11] }, conveyors: [{ row: 3, dir: 1 }, { row: 5, dir: 1 }] }),
+  L({ id: 0, seed: 8103, name: 'Sushi-Belt Café', kinds: 5, moves: 24, stars: [1500, 9000, 13000], collect: [], personalities: true, cafe: { serve: 9, slots: 2, patience: 7, size: [10, 12] }, conveyors: [{ row: 4, dir: 1 }] }),
   L({ id: 0, seed: 8104, name: 'Pier Sand', kinds: 5, moves: 24, stars: [2000, 8000, 12000], collect: [], personalities: true, conveyors: [{ row: 4, dir: -1 }], layout: ['........', '........', 'SSSSSSSS', 'SSSSSSSS', '........', 'SSSSSSSS', 'SSSSSSSS', '........', '........'] }),
   L({ id: 0, seed: 8105, name: 'Prize Piñatas', kinds: 5, moves: 24, stars: [2000, 8000, 12000], collect: [], personalities: true, conveyors: [{ row: 1, dir: 1 }, { row: 7, dir: -1 }], layout: ['........', '........', '........', '.p....p.', '........', '.p....p.', '........', '........', '........'] }),
   L({ id: 0, seed: 8106, name: 'Carousel', kinds: 5, moves: 24, stars: [2000, 9000, 13000], collect: [], golden: 12, personalities: true, ripen: { chance: 0.15 }, conveyors: [{ row: 2, dir: 1 }, { row: 4, dir: -1 }, { row: 6, dir: 1 }] }),
@@ -483,9 +477,9 @@ const VOLCANO_VALLEY: LevelDef[] = [
   L({ id: 0, seed: 9114, name: 'Ash Beach', kinds: 5, moves: 24, stars: [2000, 8000, 12000], collect: [], personalities: true, layout: ['ssssssss', 'ss....ss', '........', '...v....', '........', '....v...', '........', 'ss....ss', 'ssssssss'] }),
   L({ id: 0, seed: 9115, name: 'Fire & Ice', kinds: 5, moves: 26, stars: [2000, 8000, 12000], collect: [], personalities: true, layout: ['........', '.iiiiii.', '........', '...vv...', '........', '........', '.iiiiii.', '........', '........'] }),
   L({ id: 0, seed: 9116, name: 'Hot Piñatas', kinds: 5, moves: 26, stars: [2000, 8000, 12000], collect: [], personalities: true, layout: ['........', '........', '..p..p..', '........', '...vv...', '........', '..p..p..', '........', '........'] }),
-  L({ id: 0, seed: 9117, name: 'Magma Slope', kinds: 5, moves: 26, stars: [3000, 9000, 13000], collect: [], coconuts: 2, maxCoconuts: 2, personalities: true, tilt: true, layout: ['o......o', '........', '........', '........', '...vv...', '........', '........', '........', '........'] }),
-  L({ id: 0, seed: 9118, name: 'Ember Night', kinds: 5, moves: 26, stars: [2000, 8000, 12000], collect: [], personalities: true, night: true, layout: ['........', '.l....l.', '........', '...v....', '........', '....v...', '........', '.l....l.', '........'] }),
-  L({ id: 0, seed: 9119, name: 'Lava Belt', kinds: 5, moves: 28, stars: [2000, 8000, 12000], collect: [], personalities: true, conveyors: [{ row: 2, dir: 1 }, { row: 6, dir: -1 }], layout: ['........', '..v..v..', '........', '...v....', '........', '....v...', '........', '..v..v..', '........'] }),
+  L({ id: 0, seed: 9117, name: 'Magma Slope', kinds: 5, moves: 26, stars: [3000, 9000, 13000], collect: [], coconuts: 3, maxCoconuts: 2, personalities: true, tilt: true, layout: ['o......o', '........', '.v....v.', '........', '...vv...', '........', '........', '........', '........'] }),
+  L({ id: 0, seed: 9118, name: 'Ember Night', kinds: 5, moves: 26, stars: [2000, 8000, 12000], collect: [], personalities: true, night: true, layout: ['........', '.l....l.', '..v.....', '...v....', '........', '....v...', '.....v..', '.l....l.', '........'] }),
+  L({ id: 0, seed: 9119, name: 'Lava Belt', kinds: 5, moves: 28, stars: [2000, 8000, 12000], collect: [], personalities: true, conveyors: [{ row: 2, dir: 1 }, { row: 6, dir: -1 }], layout: ['v......v', '........', '........', 'v......v', '........', 'v......v', '........', '........', 'v......v'] }),
   L({ id: 0, seed: 9120, name: 'Volcano Fiesta', kinds: 6, moves: 30, stars: [2000, 9000, 13000], collect: [], golden: 10, personalities: true, ripen: { chance: 0.12 }, layout: ['   ..   ', '  ....  ', ' ...... ', '...vv...', '........', '..p..p..', '........', '........', '........'] }),
 ];
 
@@ -495,17 +489,12 @@ const GRAND_FIESTA: LevelDef[] = [
   L({ id: 0, seed: 1002, name: 'Lantern Piñatas', kinds: 5, moves: 26, stars: [2000, 8000, 12000], collect: [], personalities: true, night: true, layout: ['........', '.l....l.', '..p..p..', '........', '........', '........', '..p..p..', '.l....l.', '........'] }),
   L({ id: 0, seed: 1003, name: 'Frozen Lava', kinds: 5, moves: 28, stars: [2000, 8000, 12000], collect: [], personalities: true, layout: ['........', '..iiii..', '.i....i.', '.i.vv.i.', '.i....i.', '..iiii..', '........', '........', '........'] }),
   L({ id: 0, seed: 1004, name: 'Tidal Carnival', kinds: 5, moves: 28, stars: [3000, 9000, 13000], collect: [], coconuts: 2, maxCoconuts: 2, personalities: true, tide: { start: 1, every: 6, max: 6 }, conveyors: [{ row: 3, dir: 1 }], layout: ['.o....o.', '........', '........', '........', 'ssssssss', '........', '........', '........', '........'] }),
-  L({ id: 0, seed: 1005, name: 'Midnight Café', kinds: 5, moves: 28, stars: [1500, 9000, 13000], collect: [], personalities: true, night: true, cafe: { serve: 6, slots: 3, patience: 10, size: [5, 7] }, layout: ['........', '.l....l.', '........', '........', '...ll...', '........', '........', '.l....l.', '........'] }),
+  L({ id: 0, seed: 1005, name: 'Midnight Café', kinds: 5, moves: 28, stars: [1500, 9000, 13000], collect: [], personalities: true, night: true, cafe: { serve: 8, slots: 3, patience: 8, size: [5, 7] }, layout: ['........', '.l....l.', '........', '........', '...ll...', '........', '........', '.l....l.', '........'] }),
   L({ id: 0, seed: 1006, name: 'Tilt-a-Whirl', kinds: 5, moves: 28, stars: [3000, 9000, 13000], collect: [], coconuts: 3, maxCoconuts: 2, personalities: true, tilt: true, layout: ['o......o', '........', '..p..p..', '........', '........', '........', '..iiii..', '........', '........'] }),
   L({ id: 0, seed: 1007, name: 'Golden Volcano', kinds: 5, moves: 28, stars: [2000, 9000, 13000], collect: [], golden: 12, personalities: true, ripen: { chance: 0.18 }, layout: ['........', '........', '...v....', '........', 'ssssssss', '........', '....v...', '........', '........'] }),
   L({ id: 0, seed: 1008, name: 'Fireworks', kinds: 6, moves: 30, stars: [2000, 9000, 13000], collect: [], personalities: true, conveyors: [{ row: 1, dir: 1 }, { row: 7, dir: -1 }], layout: ['........', '........', '.p.pp.p.', '........', '........', '........', '.p.pp.p.', '........', '........'] }),
-  L({ id: 0, seed: 1009, name: 'Last Dance', kinds: 6, moves: 32, stars: [2000, 9000, 13000], collect: [], personalities: true, night: true, tide: { start: 1, every: 6, max: 6 }, layout: ['   ..   ', ' .l..l. ', '.iiiiii.', '........', '...vv...', '........', '........', '........', '........'] }),
-  L({ id: 0, seed: 1010, name: 'Grand Fiesta!', kinds: 6, moves: 34, stars: [2000, 9000, 13000], collect: [], personalities: true, cafe: { serve: 6, slots: 2, patience: 10, size: [7, 9] }, ripen: { chance: 0.12 }, conveyors: [{ row: 4, dir: 1 }], layout: ['  ....  ', ' .p..p. ', '..iiii..', 's......s', 'ss....ss', 's......s', '..v..v..', ' ...... ', '  ....  '] }),
-];
-
-/** Zig-zag of 10 stops up an island map (% of width, % of height), bottom to top. */
-const ZIGZAG: [number, number][] = [
-  [30, 88], [68, 81], [36, 73], [70, 65], [32, 57], [66, 49], [34, 41], [68, 33], [38, 25], [58, 16],
+  L({ id: 0, seed: 1009, name: 'Last Dance', kinds: 5, moves: 30, stars: [2000, 9000, 13000], collect: [], personalities: true, night: true, layout: ['   ..   ', ' .l..l. ', '.iiiiii.', '..p..p..', '........', '...vv...', '........', '.l....l.', '........'] }),
+  L({ id: 0, seed: 1010, name: 'Grand Fiesta!', kinds: 6, moves: 32, stars: [1500, 9000, 13000], collect: [], personalities: true, cafe: { serve: 6, slots: 2, patience: 10, size: [7, 9] }, conveyors: [{ row: 4, dir: 1 }], layout: ['  ....  ', ' .p..p. ', '..iiii..', '........', '........', '........', '..iiii..', ' .p..p. ', '  ....  '] }),
 ];
 
 export const WORLDS: WorldDef[] = [
@@ -519,6 +508,8 @@ export const WORLDS: WorldDef[] = [
   { id: 8, name: 'Carnival Pier', blurb: 'Ride the conveyor belts', map: 'bg-map-8', spots: ZIGZAG, levels: CARNIVAL_PIER },
   { id: 9, name: 'Volcano Valley', blurb: 'Cool the creeping lava', map: 'bg-map-9', spots: ZIGZAG, levels: VOLCANO_VALLEY },
   { id: 10, name: 'Grand Fiesta', blurb: 'Everything at once!', map: 'bg-map-10', spots: ZIGZAG, levels: GRAND_FIESTA },
+  // New worlds live in src/core/worlds/ (one file each). Always add them at the END so saved progress keeps its level numbers.
+  STARFRUIT_SKIES,
 ];
 
 export const LEVELS: LevelDef[] = WORLDS.flatMap((w) => w.levels);

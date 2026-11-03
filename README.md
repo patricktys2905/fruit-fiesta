@@ -29,8 +29,16 @@ Swap two specials together for a Super Combo.
 | 3. Berry Mountain | 21-30 | Island Tilt (change gravity), shaped boards |
 | 4. Citrus Grove | 31-40 | Fruit Personalities: lemons zing sand, kiwis ripen, grapes leave puddles, oranges pop a neighbour, strawberries calm customers, blueberries chill ice |
 | 5. Frosty Falls | 41-50 | frozen fruit (1-2 layers of ice) |
+| 6. Piñata Plaza | 51-60 | piñatas take 3 hits |
+| 7. Firefly Night | 61-70 | darkness, lanterns |
+| 8. Carnival Pier | 71-80 | conveyor belts |
+| 9. Volcano Valley | 81-90 | creeping lava |
+| 10. Grand Fiesta | 91-100 | everything mixed |
+| 11. Starfruit Skies | 101-110 | floating islands split by gaps, wind rows carry fruit across |
 
-Levels live in `src/core/levels.ts`. Layout strings: `.` cell, ` ` gap, `s`/`S` sand, `o` coconut, `i`/`I` ice.
+**Adding levels or worlds: see [docs/ADDING-LEVELS.md](docs/ADDING-LEVELS.md).**
+
+Levels live in `src/core/levels.ts` (worlds 1-10) and `src/core/worlds/` (one file per newer world). Layout strings: `.` cell, ` ` gap, `s`/`S` sand, `o` coconut, `i`/`I` ice.
 `npm run tune -- <from> <to>` plays each level with bots, adjusts the moves to hit the world's target
 difficulty, sets the star curve, and writes `src/core/tuning.json` (which overrides the drafts).
 `npm run sim -- <from> <to>` just reports win rates.

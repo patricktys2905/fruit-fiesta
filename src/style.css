@@ -418,3 +418,9 @@ body.has-bg-title[data-screen="title"] #scenery > * { display: none; }
 .daily-dot.won { background: #fff8e0; border-color: #f5cf6a; }
 .daily-dot.tried { color: #9a9ab0; }
 .daily-dot.today { border-color: var(--pink); }
+/* What's new */
+.news-link { margin-top: 8px; font-weight: 800; font-size: 14px; color: #fff; background: rgba(0, 0, 0, 0.18); padding: 6px 14px; border-radius: 999px; }
+.news { background: #fff7fb; border-radius: 14px; padding: 10px 14px; }
+.news h3 { margin: 0 0 4px; color: var(--deep); font-size: 18px; }
+.news ul { margin: 0; padding-left: 18px; line-height: 1.35; font-weight: 600; }
+.news li + li { margin-top: 4px; }
